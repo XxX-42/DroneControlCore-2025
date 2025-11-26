@@ -34,7 +34,7 @@
     ```
 4.  Start the API server:
     ```bash
-    uvicorn app.main:app --reload --port 8080
+   venv\Scripts\python -m uvicorn app.main:app --reload --port 8080
     ```
     *API will be available at `http://127.0.0.1:8080`*
 
@@ -53,6 +53,13 @@
     npm run dev
     ```
     *Access the UI at `http://localhost:5173`*
+
+### Version Control
+
+To force push changes to the main branch:
+```bash
+git push -u -f origin main
+```
 
 ## Deployment (Docker)
 
