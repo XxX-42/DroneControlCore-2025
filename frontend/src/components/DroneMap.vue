@@ -6,6 +6,7 @@
       :center="[30.598, 103.991]"
       :use-global-leaflet="false"
       @click="onMapClick"
+      @zoomend="updateZoom"
     >
       <l-tile-layer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -27,7 +28,6 @@
       ></l-polyline>
 
       <!-- AI Targets (Orange) -->
-      <!-- Using CircleMarker for targets to easily distinguish color without custom icons -->
       <l-circle-marker
         v-for="(obj, index) in detectedObjects"
         :key="'target-'+index"
@@ -65,31 +65,57 @@
       </l-circle-marker>
     </l-map>
 
-    <!-- Floating Mission Controls -->
-    <div class="mission-controls">
-      <h3>Mission Planner</h3>
-      <div class="stats">
-        Waypoints: {{ waypoints.length }}
-      </div>
-      <button @click="uploadMission" :disabled="waypoints.length === 0">
-        Upload Mission
-      </button>
-      <button @click="clearMission" v-if="waypoints.length > 0" style="background-color: #dc3545;">
-        Clear
-      </button>
+    <!-- Dashboard Panel (Sidebar) -->
+    <div class="dashboard-panel">
+      <h3>Drone Control</h3>
       
-      <!-- Vision Recon -->
-      <input type="file" ref="fileInput" @change="analyzeImage" style="display: none" accept="image/*">
-      <button @click="triggerUpload" style="background-color: #6f42c1;">
-        👁️ Vision Recon
-      </button>
+      <!-- Map Info -->
+      <div class="panel-section">
+        <strong>Map Info</strong>
+        <div>Zoom Level: {{ currentZoom }}</div>
+      </div>
 
-      <!-- Telemetry Stats -->
-      <div v-if="dronePos" class="telemetry-stats">
-        <h4>Telemetry</h4>
-        <p>Lat: {{ dronePos.lat.toFixed(5) }}</p>
-        <p>Lon: {{ dronePos.lon.toFixed(5) }}</p>
-        <p>Hdg: {{ dronePos.heading.toFixed(1) }}°</p>
+      <!-- Telemetry -->
+      <div class="panel-section" v-if="dronePos">
+        <strong>Telemetry</strong>
+        <div>Lat: {{ dronePos.lat.toFixed(5) }}</div>
+        <div>Lon: {{ dronePos.lon.toFixed(5) }}</div>
+        <div>Hdg: {{ dronePos.heading.toFixed(1) }}°</div>
+        <div>Alt: {{ dronePos.alt.toFixed(1) }}m</div>
+      </div>
+
+      <!-- Speed Control -->
+      <div class="panel-section">
+        <strong>Sim Speed: {{ speedFactor }}x</strong>
+        <input 
+          type="range" 
+          min="1" 
+          max="100" 
+          v-model="speedFactor" 
+          @input="changeSpeed"
+          style="width: 100%;"
+        >
+      </div>
+
+      <!-- Mission Control -->
+      <div class="panel-section">
+        <strong>Mission</strong>
+        <div class="button-group">
+          <button @click="uploadMission" :disabled="waypoints.length === 0">Upload</button>
+          <button @click="clearMission" class="btn-danger" :disabled="waypoints.length === 0">Clear</button>
+        </div>
+        <div style="margin-top: 5px;">
+           <input type="file" ref="fileInput" @change="analyzeImage" style="display: none" accept="image/*">
+           <button @click="triggerUpload" class="btn-purple" style="width: 100%;">👁️ Vision Recon</button>
+        </div>
+      </div>
+
+      <!-- Waypoint List -->
+      <div class="panel-section waypoint-list" v-if="waypoints.length > 0">
+        <strong>Waypoints ({{ waypoints.length }})</strong>
+        <div v-for="(wp, i) in waypoints" :key="i" class="waypoint-item">
+          WP {{ i+1 }}: [{{ wp.latitude.toFixed(4) }}, {{ wp.longitude.toFixed(4) }}]
+        </div>
       </div>
     </div>
   </div>
@@ -99,19 +125,25 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { LMap, LTileLayer, LMarker, LPolyline, LCircleMarker, LPopup } from "@vue-leaflet/vue-leaflet";
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 
 const zoom = ref(13);
+const currentZoom = ref(13);
 const waypoints = ref([]);
 const dronePos = ref(null);
 const detectedObjects = ref([]);
 const fileInput = ref(null);
+const speedFactor = ref(5);
 let socket = null;
 
 // Compute path for polyline
 const pathCoordinates = computed(() => {
   return waypoints.value.map(wp => [wp.latitude, wp.longitude]);
 });
+
+const updateZoom = (e) => {
+  currentZoom.value = e.target.getZoom();
+};
 
 // Handle map clicks to add waypoints
 const onMapClick = (e) => {
@@ -134,7 +166,6 @@ const uploadMission = async () => {
   };
 
   try {
-    // Using port 8080 as per backend logs
     const response = await fetch('http://127.0.0.1:8080/api/v1/missions/upload', {
       method: 'POST',
       headers: {
@@ -152,7 +183,21 @@ const uploadMission = async () => {
     }
   } catch (err) {
     console.error(err);
-    alert("Network Error: Check console. (Likely CORS or Backend Offline)");
+    alert("Network Error: Check console.");
+  }
+};
+
+const changeSpeed = async () => {
+  try {
+    await fetch('http://127.0.0.1:8080/api/v1/telemetry/speed', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ speed: parseFloat(speedFactor.value) })
+    });
+  } catch (err) {
+    console.error("Failed to update speed:", err);
   }
 };
 
@@ -266,42 +311,55 @@ onUnmounted(() => {
 /* Ensure map tiles render correctly */
 .leaflet-pane { z-index: 1 !important; }
 
-.mission-controls {
+.dashboard-panel {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  z-index: 1000; /* Ensure it's above the map */
-  background: white;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: 250px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(5px);
   padding: 15px;
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-width: 200px;
+  gap: 15px;
+  overflow-y: auto;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-.mission-controls h3, .mission-controls h4 {
-  margin: 0 0 5px 0;
-  font-size: 1.1rem;
+.dashboard-panel h3 {
+  margin: 0;
+  text-align: center;
   color: #333;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 10px;
 }
 
-.stats, .telemetry-stats p {
-  font-size: 0.9rem;
-  color: #666;
+.panel-section {
+  background: rgba(255, 255, 255, 0.5);
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #eee;
+}
+
+.panel-section strong {
+  display: block;
   margin-bottom: 5px;
-  margin-top: 0;
+  color: #555;
+  font-size: 0.9rem;
 }
 
-.telemetry-stats {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #eee;
+.button-group {
+  display: flex;
+  gap: 5px;
 }
 
 button {
-  padding: 10px;
+  flex: 1;
+  padding: 8px;
   background-color: #007bff;
   color: white;
   border: none;
@@ -309,6 +367,7 @@ button {
   cursor: pointer;
   font-weight: bold;
   transition: background-color 0.2s;
+  font-size: 0.85rem;
 }
 
 button:disabled {
@@ -318,5 +377,30 @@ button:disabled {
 
 button:hover:not(:disabled) {
   background-color: #0056b3;
+}
+
+.btn-danger {
+  background-color: #dc3545;
+}
+.btn-danger:hover:not(:disabled) {
+  background-color: #bd2130;
+}
+
+.btn-purple {
+  background-color: #6f42c1;
+}
+.btn-purple:hover:not(:disabled) {
+  background-color: #59359a;
+}
+
+.waypoint-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.waypoint-item {
+  font-size: 0.8rem;
+  padding: 2px 0;
+  border-bottom: 1px solid #eee;
 }
 </style>

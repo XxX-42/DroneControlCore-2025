@@ -13,6 +13,7 @@ from app.infrastructure.mavsdk.connection import mavsdk_manager
 from app.infrastructure.database.db import get_db
 from app.infrastructure.database.models import MissionModel
 from app.domain.mission import Mission, Waypoint
+from app.core.drone_state import drone_state
 
 router = APIRouter()
 
@@ -53,7 +54,14 @@ async def upload_mission(mission_data: MissionDTO, db: AsyncSession = Depends(ge
         else:
             print("⚠️ Drone system not connected. Skipping hardware upload.")
         
-        # 2. Persist to Database
+        # 2. Update Physics Engine Target
+        if mission_data.waypoints:
+            last_wp = mission_data.waypoints[-1]
+            drone_state.target_lat = last_wp.latitude
+            drone_state.target_lon = last_wp.longitude
+            print(f">>> New Target Set: {drone_state.target_lat}, {drone_state.target_lon}")
+
+        # 3. Persist to Database
         mission_entry = MissionModel(
             name=mission_data.name,
             status="UPLOADED",
