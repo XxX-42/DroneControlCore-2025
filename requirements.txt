@@ -1,0 +1,13 @@
+fastapi>=0.110.0
+mavsdk>=2.0.0
+sqlalchemy[asyncio]
+uvicorn
+pydantic-settings
+asyncpg
+ultralytics
+opencv-python-headless
+python-multipart
+aiosqlite
+pytest
+pytest-asyncio
+httpx
