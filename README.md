@@ -33,8 +33,9 @@
     pip install -r requirements.txt
     ```
 4.  Start the API server:
-    ```bash
-   venv\Scripts\python -m uvicorn app.main:app --reload --port 8080
+
+    ```powershell
+    venv\Scripts\python -m uvicorn app.main:app --reload --port 8080
     ```
     *API will be available at `http://127.0.0.1:8080`*
 
