@@ -11,3 +11,8 @@ aiosqlite
 pytest
 pytest-asyncio
 httpx
+osmnx
+networkx
+shapely
+requests
+scikit-learn

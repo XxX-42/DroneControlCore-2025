@@ -1,12 +1,52 @@
 <template>
-  <div style="height: 100vh; width: 100%; position: relative;">
+  <div style="height: 100vh; width: 100%">
+    <div class="control-panel">
+      <h3>L3 Autonomous Nav</h3>
+      <div class="status-box">
+        <span class="label">State:</span>
+        <span class="value" :class="flightState">{{ flightState }}</span>
+      </div>
+      
+      <div class="telemetry-grid">
+        <div>
+          <span class="label">Dist to Target</span>
+          <span class="value">{{ distanceToTarget.toFixed(1) }} m</span>
+        </div>
+        <div>
+          <span class="label">Spiral Radius</span>
+          <span class="value">{{ spiralRadius.toFixed(1) }} m</span>
+        </div>
+        <div>
+          <span class="label">Altitude</span>
+          <span class="value">100.0 m</span>
+        </div>
+        <div>
+          <span class="label">Speed</span>
+          <span class="value">{{ (speed * 100000).toFixed(1) }} kts</span>
+        </div>
+      </div>
+
+      <div class="action-area">
+        <p v-if="waypoints.length === 0" class="hint">Click map to set Target</p>
+        <p v-else class="hint">Target: WP {{ currentTargetIndex + 1 }} / {{ waypoints.length }}</p>
+        
+        <div class="btn-group">
+          <button @click="uploadMission" :disabled="waypoints.length === 0 || flightState !== 'IDLE'">
+            {{ flightState === 'IDLE' ? '▶ EXECUTE MISSION' : 'MISSION RUNNING...' }}
+          </button>
+          <button @click="clearMission" class="btn-danger">
+            ✖ ABORT
+          </button>
+        </div>
+      </div>
+    </div>
+
     <l-map 
       ref="map" 
       v-model:zoom="zoom" 
       :center="[30.598, 103.991]"
       :use-global-leaflet="false"
       @click="onMapClick"
-      @zoomend="updateZoom"
     >
       <l-tile-layer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -14,110 +54,59 @@
         name="OpenStreetMap"
       ></l-tile-layer>
 
-      <!-- Waypoint Markers (Blue) -->
-      <l-marker
-        v-for="(wp, index) in waypoints"
-        :key="'wp-'+index"
+      <!-- User Target (Blue Marker) -->
+      <l-marker 
+        v-for="(wp, index) in waypoints" 
+        :key="'wp-'+index" 
         :lat-lng="[wp.latitude, wp.longitude]"
-      ></l-marker>
+      >
+        <l-popup>Target {{ index + 1 }}</l-popup>
+      </l-marker>
 
-      <!-- Flight Path -->
+      <!-- PHASE 1: Road Path (Green Polyline) -->
       <l-polyline
-        :lat-lngs="pathCoordinates"
-        color="blue"
+        v-if="roadWaypoints.length > 0"
+        :lat-lngs="roadWaypoints"
+        color="#00ff00"
+        :weight="4"
+        :opacity="0.8"
+      >
+        <l-popup>Phase 1: Road Network Approach</l-popup>
+      </l-polyline>
+
+      <!-- PHASE 2: Off-Road Dash (Yellow Dashed) -->
+      <l-polyline
+        v-if="roadWaypoints.length > 0 && waypoints.length > 0"
+        :lat-lngs="[roadWaypoints[roadWaypoints.length-1], [waypoints[currentTargetIndex].latitude, waypoints[currentTargetIndex].longitude]]"
+        color="#ffcc00"
+        :weight="3"
+        dash-array="10, 10"
+      >
+        <l-popup>Phase 2: Last Mile Off-Road</l-popup>
+      </l-polyline>
+
+      <!-- Drone History (Red Trail) -->
+      <l-polyline
+        :lat-lngs="dronePath"
+        color="red"
+        :weight="2"
       ></l-polyline>
 
-      <!-- AI Targets (Orange) -->
+      <!-- Drone Icon (Red Circle) -->
       <l-circle-marker
-        v-for="(obj, index) in detectedObjects"
-        :key="'target-'+index"
-        :lat-lng="[obj.geo_location.lat, obj.geo_location.lon]"
+        :lat-lng="[dronePos.lat, dronePos.lng]"
         :radius="8"
-        color="orange"
-        fill-color="#ff9800"
-        :fill-opacity="0.9"
-      >
-        <l-popup>
-          <div style="text-align: center;">
-            <strong>Target: {{ obj.label }}</strong><br/>
-            <small>Conf: {{ (obj.confidence * 100).toFixed(1) }}%</small><br/>
-            <small>Dist: {{ obj.geo_location.distance_m.toFixed(1) }}m</small><br/>
-            <button 
-              @click="setTargetAsWaypoint(obj)" 
-              style="margin-top:5px; background-color: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;"
-            >
-              Fly Here
-            </button>
-          </div>
-        </l-popup>
-      </l-circle-marker>
-
-      <!-- Drone Position Marker (Red) -->
-      <l-circle-marker
-        v-if="dronePos"
-        :lat-lng="[dronePos.lat, dronePos.lon]"
-        :radius="10"
         color="red"
         fill-color="#f03"
-        :fill-opacity="0.8"
+        :fill-opacity="1"
       >
-        <l-popup>Drone Live</l-popup>
+         <l-popup>
+           <strong>Drone Live</strong><br>
+           State: {{ flightState }}
+         </l-popup>
       </l-circle-marker>
+
     </l-map>
-
-    <!-- Dashboard Panel (Sidebar) -->
-    <div class="dashboard-panel">
-      <h3>Drone Control</h3>
-      
-      <!-- Map Info -->
-      <div class="panel-section">
-        <strong>Map Info</strong>
-        <div>Zoom Level: {{ currentZoom }}</div>
-      </div>
-
-      <!-- Telemetry -->
-      <div class="panel-section" v-if="dronePos">
-        <strong>Telemetry</strong>
-        <div>Lat: {{ dronePos.lat.toFixed(5) }}</div>
-        <div>Lon: {{ dronePos.lon.toFixed(5) }}</div>
-        <div>Hdg: {{ dronePos.heading.toFixed(1) }}°</div>
-        <div>Alt: {{ dronePos.alt.toFixed(1) }}m</div>
-      </div>
-
-      <!-- Speed Control -->
-      <div class="panel-section">
-        <strong>Sim Speed: {{ speedFactor }}x</strong>
-        <input 
-          type="range" 
-          min="1" 
-          max="100" 
-          v-model="speedFactor" 
-          @input="changeSpeed"
-          style="width: 100%;"
-        >
-      </div>
-
-      <!-- Mission Control -->
-      <div class="panel-section">
-        <strong>Mission</strong>
-        <div class="button-group">
-          <button @click="uploadMission" :disabled="waypoints.length === 0">Upload</button>
-          <button @click="clearMission" class="btn-danger" :disabled="waypoints.length === 0">Clear</button>
-        </div>
-        <div style="margin-top: 5px;">
-           <input type="file" ref="fileInput" @change="analyzeImage" style="display: none" accept="image/*">
-           <button @click="triggerUpload" class="btn-purple" style="width: 100%;">👁️ Vision Recon</button>
-        </div>
-      </div>
-
-      <!-- Waypoint List -->
-      <div class="panel-section waypoint-list" v-if="waypoints.length > 0">
-        <strong>Waypoints ({{ waypoints.length }})</strong>
-        <div v-for="(wp, i) in waypoints" :key="i" class="waypoint-item">
-          WP {{ i+1 }}: [{{ wp.latitude.toFixed(4) }}, {{ wp.longitude.toFixed(4) }}]
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -125,282 +114,324 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { LMap, LTileLayer, LMarker, LPolyline, LCircleMarker, LPopup } from "@vue-leaflet/vue-leaflet";
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref } from "vue";
 
-const zoom = ref(13);
-const currentZoom = ref(13);
+// --- State ---
+const zoom = ref(14);
 const waypoints = ref([]);
-const dronePos = ref(null);
-const detectedObjects = ref([]);
-const fileInput = ref(null);
-const speedFactor = ref(5);
-let socket = null;
+const dronePos = ref({ lat: 30.598, lng: 103.991 }); // Start pos
+const dronePath = ref([]);
 
-// Compute path for polyline
-const pathCoordinates = computed(() => {
-  return waypoints.value.map(wp => [wp.latitude, wp.longitude]);
-});
+// Navigation Data
+const roadWaypoints = ref([]); // [lat, lng] array from OSRM
+const currentRoadIndex = ref(0);
+const currentTargetIndex = ref(0); // Track which waypoint we are targeting
 
-const updateZoom = (e) => {
-  currentZoom.value = e.target.getZoom();
-};
+// Flight Logic State Machine
+const flightState = ref('IDLE'); // IDLE, PLANNING, FOLLOW_ROAD, OFF_ROAD_APPROACH, SPIRAL_ENTRY, SPIRAL_DESCENT, COMPLETED
+const distanceToTarget = ref(0);
+const spiralRadius = ref(0);
+const orbitAngle = ref(0);
+const speed = 0.00010; // Simulation speed factor
 
-// Handle map clicks to add waypoints
+// --- Interactions ---
 const onMapClick = (e) => {
-  waypoints.value.push({
-    latitude: e.latlng.lat,
-    longitude: e.latlng.lng,
-    relative_altitude: 20.0, // Default altitude 20m
-    speed_m_s: 5.0 // Default speed 5m/s
-  });
+  if (flightState.value !== 'IDLE') return;
+  const { lat, lng } = e.latlng;
+  waypoints.value.push({ latitude: lat, longitude: lng });
 };
 
 const clearMission = () => {
   waypoints.value = [];
+  dronePath.value = [];
+  roadWaypoints.value = [];
+  flightState.value = 'IDLE';
+  currentRoadIndex.value = 0;
+  currentTargetIndex.value = 0;
+  spiralRadius.value = 0;
 };
 
 const uploadMission = async () => {
-  const missionData = {
-    name: `Mission ${new Date().toLocaleTimeString()}`,
-    waypoints: waypoints.value
-  };
+  if (waypoints.value.length === 0) return;
+  
+  // Trigger Planning for First Leg
+  flightState.value = 'PLANNING';
+  currentTargetIndex.value = 0;
+  
+  // 1. Fetch Route from OSRM
+  const start = dronePos.value;
+  const end = waypoints.value[currentTargetIndex.value];
+  
+  await fetchRoute(start, end);
+};
 
+// --- OSRM Integration ---
+const fetchRoute = async (start, end) => {
+  // OSRM expects {lng},{lat}
+  const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.longitude},${end.latitude}?overview=full&geometries=geojson`;
+  
   try {
-    const response = await fetch('http://127.0.0.1:8080/api/v1/missions/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(missionData)
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      alert(`Success: ${result.message}`);
+    const res = await fetch(url);
+    const data = await res.json();
+    
+    if (data.routes && data.routes.length > 0) {
+      const coords = data.routes[0].geometry.coordinates;
+      // Flip [lng, lat] -> [lat, lng] for Leaflet
+      roadWaypoints.value = coords.map(c => [c[1], c[0]]);
+      
+      console.log(`Path Found: ${roadWaypoints.value.length} nodes.`);
+      
+      // Start Execution
+      currentRoadIndex.value = 0;
+      flightState.value = 'FOLLOW_ROAD';
+      requestAnimationFrame(animate);
+      
     } else {
-      const error = await response.json();
-      alert(`Error: ${error.detail || 'Upload failed'}`);
+      console.warn("No road path found! Flying direct.");
+      roadWaypoints.value = [];
+      flightState.value = 'OFF_ROAD_APPROACH';
+      requestAnimationFrame(animate);
     }
-  } catch (err) {
-    console.error(err);
-    alert("Network Error: Check console.");
+  } catch (e) {
+    console.error("OSRM Error:", e);
+    alert("Routing Failed. Check Console.");
+    flightState.value = 'IDLE';
   }
 };
 
-const changeSpeed = async () => {
-  try {
-    await fetch('http://127.0.0.1:8080/api/v1/telemetry/speed', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ speed: parseFloat(speedFactor.value) })
-    });
-  } catch (err) {
-    console.error("Failed to update speed:", err);
+// --- Physics Engine ---
+const getDistance = (p1, p2) => {
+  const R = 6371e3; 
+  const φ1 = p1.lat * Math.PI/180;
+  const φ2 = p2.lat * Math.PI/180;
+  const Δφ = (p2.lat-p1.lat) * Math.PI/180;
+  const Δλ = (p2.lng-p1.lng) * Math.PI/180;
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+const animate = () => {
+  // Stop animation loop if we are waiting for planning or idle/completed
+  if (flightState.value === 'COMPLETED' || flightState.value === 'IDLE' || flightState.value === 'PLANNING') return;
+
+  const target = waypoints.value[currentTargetIndex.value];
+  const targetLat = target.latitude;
+  const targetLng = target.longitude;
+  
+  // Global Dist to Final Target
+  distanceToTarget.value = getDistance(dronePos.value, { lat: targetLat, lng: targetLng });
+
+  // --- STATE MACHINE ---
+  
+  // STATE: FOLLOW_ROAD
+  if (flightState.value === 'FOLLOW_ROAD') {
+    if (currentRoadIndex.value >= roadWaypoints.value.length) {
+      // End of road
+      flightState.value = 'OFF_ROAD_APPROACH';
+    } else {
+      const roadNode = roadWaypoints.value[currentRoadIndex.value];
+      const nodeLat = roadNode[0];
+      const nodeLng = roadNode[1];
+      
+      const distToNode = getDistance(dronePos.value, { lat: nodeLat, lng: nodeLng });
+      
+      if (distToNode < 10) { // 10m tolerance
+        currentRoadIndex.value++;
+      } else {
+        // Fly to Node
+        const angle = Math.atan2(nodeLng - dronePos.value.lng, nodeLat - dronePos.value.lat);
+        dronePos.value.lat += Math.cos(angle) * speed;
+        dronePos.value.lng += Math.sin(angle) * speed;
+      }
+    }
   }
-};
-
-const triggerUpload = () => {
-  fileInput.value.click();
-};
-
-const analyzeImage = async (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const response = await fetch('http://127.0.0.1:8080/vision/analyze', {
-      method: 'POST',
-      body: formData
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      const detections = result.detections;
+  
+  // STATE: OFF_ROAD_APPROACH
+  else if (flightState.value === 'OFF_ROAD_APPROACH') {
+    // Fly straight to Final Target
+    if (distanceToTarget.value <= 100) {
+      flightState.value = 'SPIRAL_ENTRY';
+    } else {
+      const angle = Math.atan2(targetLng - dronePos.value.lng, targetLat - dronePos.value.lat);
+      dronePos.value.lat += Math.cos(angle) * speed;
+      dronePos.value.lng += Math.sin(angle) * speed;
+    }
+  }
+  
+  // STATE: SPIRAL_ENTRY
+  else if (flightState.value === 'SPIRAL_ENTRY') {
+    // Calculate smooth entry
+    orbitAngle.value = Math.atan2(dronePos.value.lng - targetLng, dronePos.value.lat - targetLat);
+    spiralRadius.value = distanceToTarget.value;
+    flightState.value = 'SPIRAL_DESCENT';
+  }
+  
+  // STATE: SPIRAL_DESCENT
+  else if (flightState.value === 'SPIRAL_DESCENT') {
+    orbitAngle.value += 0.05; 
+    
+    if (spiralRadius.value > 20) {
+      spiralRadius.value -= 0.1;
+    } else {
+      // Spiral Complete
+      console.log(`Waypoint ${currentTargetIndex.value + 1} Reached.`);
       
-      detectedObjects.value = []; // Clear old detections
-      
-      if (detections.length === 0) {
-        alert("Vision Recon: No objects detected.");
+      // Check for Next Waypoint
+      if (currentTargetIndex.value < waypoints.value.length - 1) {
+        // Prepare Next Leg
+        currentTargetIndex.value++;
+        flightState.value = 'PLANNING';
+        
+        // Trigger Planning for Next Leg
+        const start = dronePos.value;
+        const end = waypoints.value[currentTargetIndex.value];
+        fetchRoute(start, end);
+        return; // Exit animate loop, fetchRoute will restart it
+      } else {
+        // All Done
+        console.log("Mission Complete.");
+        flightState.value = 'COMPLETED';
+        alert("All Targets Reached! Mission Complete.");
         return;
       }
-
-      // Filter and store detections with geolocation
-      let targetsFound = 0;
-      detections.forEach(d => {
-        if (d.geo_location) {
-          detectedObjects.value.push(d);
-          targetsFound++;
-        }
-      });
-
-      // Summarize detections
-      const summary = {};
-      detections.forEach(d => {
-        summary[d.label] = (summary[d.label] || 0) + 1;
-      });
-      
-      const summaryStr = Object.entries(summary)
-        .map(([label, count]) => `${count} ${label}`)
-        .join(", ");
-
-      alert(`Vision Recon Results:\nFound: ${summaryStr}\n\n${targetsFound} Targets plotted on map.`);
-    } else {
-      const error = await response.json();
-      alert(`Vision Error: ${error.detail || 'Analysis failed'}`);
     }
-  } catch (err) {
-    console.error(err);
-    alert("Vision Network Error: Check console.");
+
+    // Orbit Logic
+    const latOffset = (spiralRadius.value * Math.cos(orbitAngle.value)) / 111320;
+    const lngOffset = (spiralRadius.value * Math.sin(orbitAngle.value)) / 96000;
+
+    dronePos.value.lat = targetLat + latOffset;
+    dronePos.value.lng = targetLng + lngOffset;
   }
-};
 
-const setTargetAsWaypoint = (target) => {
-  if (!target.geo_location) return;
-  
-  // Clear existing waypoints and set target as the single waypoint
-  waypoints.value = [{
-    latitude: target.geo_location.lat,
-    longitude: target.geo_location.lon,
-    relative_altitude: 20.0,
-    speed_m_s: 5.0
-  }];
-  
-  // Automatically upload mission
-  uploadMission();
-};
-
-onMounted(() => {
-  // Connect to Telemetry WebSocket
-  socket = new WebSocket('ws://127.0.0.1:8080/ws/telemetry');
-
-  socket.onopen = () => {
-    console.log("Telemetry Connected");
-  };
-
-  socket.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      dronePos.value = data;
-    } catch (e) {
-      console.error("Error parsing telemetry:", e);
-    }
-  };
-
-  socket.onclose = () => {
-    console.log("Telemetry Disconnected");
-  };
-  
-  socket.onerror = (error) => {
-    console.error("WebSocket Error:", error);
-  };
-});
-
-onUnmounted(() => {
-  if (socket) {
-    socket.close();
+  // Record History
+  if (dronePath.value.length === 0 || 
+      getDistance({lat: dronePath.value[dronePath.value.length-1][0], lng: dronePath.value[dronePath.value.length-1][1]}, dronePos.value) > 2) {
+      dronePath.value.push([dronePos.value.lat, dronePos.value.lng]);
   }
-});
+
+  requestAnimationFrame(animate);
+};
 </script>
 
-<style>
-/* Ensure map tiles render correctly */
-.leaflet-pane { z-index: 1 !important; }
-
-.dashboard-panel {
+<style scoped>
+.control-panel {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  bottom: 10px;
-  width: 250px;
+  top: 20px;
+  right: 20px;
   z-index: 1000;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(5px);
-  padding: 15px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-  overflow-y: auto;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: rgba(15, 23, 42, 0.95); /* Dark Slate */
+  color: #e2e8f0;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  font-family: 'Inter', sans-serif;
+  width: 280px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.1);
 }
 
-.dashboard-panel h3 {
-  margin: 0;
-  text-align: center;
-  color: #333;
-  border-bottom: 2px solid #007bff;
+h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.2rem;
+  color: #38bdf8; /* Sky Blue */
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
   padding-bottom: 10px;
 }
 
-.panel-section {
-  background: rgba(255, 255, 255, 0.5);
+.status-box {
+  background: rgba(255,255,255,0.05);
   padding: 10px;
   border-radius: 6px;
-  border: 1px solid #eee;
-}
-
-.panel-section strong {
-  display: block;
-  margin-bottom: 5px;
-  color: #555;
-  font-size: 0.9rem;
-}
-
-.button-group {
+  margin-bottom: 15px;
   display: flex;
-  gap: 5px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-box .value {
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+}
+
+.status-box .value.FOLLOW_ROAD { color: #4ade80; }
+.status-box .value.OFF_ROAD_APPROACH { color: #facc15; }
+.status-box .value.SPIRAL_DESCENT { color: #f472b6; }
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.telemetry-grid div {
+  background: rgba(0,0,0,0.2);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.label {
+  display: block;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.value {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 button {
-  flex: 1;
-  padding: 8px;
-  background-color: #007bff;
-  color: white;
+  padding: 12px;
   border: none;
-  border-radius: 4px;
-  cursor: pointer;
+  border-radius: 6px;
+  background: #0ea5e9;
+  color: white;
   font-weight: bold;
-  transition: background-color 0.2s;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
   font-size: 0.85rem;
-}
-
-button:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
+  letter-spacing: 0.5px;
 }
 
 button:hover:not(:disabled) {
-  background-color: #0056b3;
+  background: #0284c7;
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  background: #334155;
+  color: #64748b;
+  cursor: not-allowed;
 }
 
 .btn-danger {
-  background-color: #dc3545;
-}
-.btn-danger:hover:not(:disabled) {
-  background-color: #bd2130;
+  background: #ef4444;
 }
 
-.btn-purple {
-  background-color: #6f42c1;
-}
-.btn-purple:hover:not(:disabled) {
-  background-color: #59359a;
-}
-
-.waypoint-list {
-  max-height: 150px;
-  overflow-y: auto;
-}
-
-.waypoint-item {
-  font-size: 0.8rem;
-  padding: 2px 0;
-  border-bottom: 1px solid #eee;
+.btn-danger:hover {
+  background: #dc2626;
 }
 </style>
