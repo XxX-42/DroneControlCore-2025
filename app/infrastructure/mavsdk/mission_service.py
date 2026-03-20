@@ -2,6 +2,7 @@ import math
 from app.domain.mission import Mission
 from mavsdk import System
 from mavsdk.mission import MissionItem, MissionPlan
+from app.core.drone_state import drone_state
 
 class MavsdkMissionService:
     """
@@ -40,8 +41,22 @@ class MavsdkMissionService:
             await system.mission.upload_mission(mission_plan)
             print("Mission uploaded to hardware.")
         except Exception as e:
-            print(f"⚠️ [SIMULATION MODE] Hardware upload failed: {e}")
-            print("✅ Mocking success response for UI testing.")
-            # Do NOT raise the exception to simulate success
+            print(f"⚠️ Hardware offline or upload failed: {e}")
+            print(f">>> MOCK UPLOAD: Mission '{mission.name}' accepted in simulation mode.")
+            
+            # --- SIMULATION OVERRIDE ---
+            # Push waypoints to the physics engine so the drone actually "flies" them.
+            sim_route = []
+            for wp in mission.waypoints:
+                sim_route.append({
+                    "latitude": wp.latitude, 
+                    "longitude": wp.longitude,
+                    "is_user_target": True # Assume all uploaded points are targets
+                })
+            
+            drone_state.set_mission(sim_route)
+            
+            # We swallow the error to keep the frontend happy in DEV mode
+            return
 
 mavsdk_mission_service = MavsdkMissionService()

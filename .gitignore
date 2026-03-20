@@ -1,0 +1,18 @@
+# Python Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local Environment
+venv/
+.env
+
+# Data Caches
+cache/
+*.json
+!settings.json
+
+# Local artifacts
+*.pt
+drone.db

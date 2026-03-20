@@ -6,14 +6,22 @@ from PIL import Image
 from app.infrastructure.vision.geo_math import GeoLocator
 
 class YoloService:
+    # Config
+    MAX_QUEUE_SIZE = 1 # Drop everything if we can't keep up
+    
     def __init__(self):
         print("Initializing YOLOv8 model...")
         # Initialize YOLOv8 nano model (auto-downloads if needed)
         self.model = YOLO('yolov8n.pt')
-        # Thread pool for CPU-bound inference tasks
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        
+        # Dynamic ThreadPool
+        import os
+        workers = min(32, (os.cpu_count() or 1) + 4)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        
         self.geo_locator = GeoLocator()
-        print("YOLOv8 model initialized.")
+        self.inference_queue = asyncio.Queue(maxsize=self.MAX_QUEUE_SIZE)
+        print(f"YOLOv8 initialized with {workers} workers.")
 
     def _predict_sync(self, image_bytes: bytes):
         """
@@ -39,14 +47,32 @@ class YoloService:
 
     async def analyze_image(self, image_bytes: bytes):
         """
-        Asynchronous wrapper to run inference in a separate thread.
+        Asynchronous wrapper with FRAME DROPPING.
+        If the queue is full, we don't even start processing this frame.
+        This prevents 'lag buildup' where we show results from 5s ago.
         """
+        # 1. Circuit Breaker / Frame Drop
+        # If we have too many pending tasks, we assume the system is overloaded.
+        # Ideally, we'd drop the *oldest* from the queue, but here we just likely reject the new one 
+        # or implement a "latest only" pattern.
+        # Simpler approach: If the executor has too many items, skip.
+        
+        # Ideally, we want to run the prediction in the executor.
         loop = asyncio.get_running_loop()
-        detections = await loop.run_in_executor(
-            self.executor, 
-            self._predict_sync, 
-            image_bytes
-        )
+        
+        # Check if we are overwhelmed (heuristic)
+        if self.executor._work_queue.qsize() > 2:
+            print("[YOLO] Dropping frame - worker pool overloaded.")
+            return []
+
+        try:
+            detections = await loop.run_in_executor(
+                self.executor, 
+                self._predict_sync, 
+                image_bytes
+            )
+        except Exception:
+            return []
         
         # Mock Drone State (Chengdu)
         drone_lat = 30.598

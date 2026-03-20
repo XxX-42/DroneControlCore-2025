@@ -14,12 +14,22 @@ class DroneState:
     
     SPIRAL_DECAY = 0.000003      # How fast it shrinks per tick
     
+    # --- Validation Limits ---
+    MAX_SPEED_MPS = 20.0       # Max Speed (m/s) (approx check)
+    MAX_ALT_M = 500.0          # Ceiling
+    MIN_ALT_M = 0.0            # Ground
+    CLAMP_LAT_BOUNDS = (-90, 90)
+    CLAMP_LON_BOUNDS = (-180, 180)
+    
     def __init__(self):
         # Initial State (Chengdu)
         self.lat = 30.598
         self.lon = 103.991
         self.alt = 100.0
         self.heading = 0.0
+        self.pitch = 0.0
+        self.roll = 0.0
+        self.yaw = 0.0      # Redundant with heading, but standard convention
         
         # Navigation Data
         self.waypoint_queue: List[Dict] = []
@@ -32,6 +42,9 @@ class DroneState:
         
         # User Controls
         self.sim_speed_factor = 1.0
+        
+        # Internal Loop Control
+        self._running = False
 
     def set_speed(self, factor: float):
         self.sim_speed_factor = factor
@@ -44,12 +57,31 @@ class DroneState:
         self.state = "NAVIGATING"
         print(f"[DEBUG] Mission Set. {len(full_route)} waypoints.")
 
+    async def start_physics_loop(self):
+        """
+        Runs the physics simulation at ~20Hz (50ms).
+        This decouples the simulation from the WebSocket connection.
+        """
+        import asyncio
+        print("[PHYSICS] Engine Started.")
+        self._running = True
+        try:
+            while self._running:
+                self.update_position()
+                await asyncio.sleep(0.05) # 20Hz
+        except asyncio.CancelledError:
+            print("[PHYSICS] Engine Stopping...")
+            self._running = False
+            raise
+
     def update_position(self):
         # Apply speed factor
         current_speed = self.SPEED * self.sim_speed_factor
         
         if this_is_idle := (not self.waypoint_queue and self.state != "SPIRALING"):
             self.state = "IDLE"
+            self.pitch = 0.0
+            self.roll = 0.0
             return
 
         # --- STATE: NAVIGATING (Flying to target) ---
@@ -93,7 +125,20 @@ class DroneState:
                 angle = math.atan2(dx, dy) # Bearing
                 self.lat += current_speed * math.cos(angle)
                 self.lon += current_speed * math.sin(angle)
-                self.heading = (math.degrees(angle) + 360) % 360
+                
+                target_heading = (math.degrees(angle) + 360) % 360
+                
+                # --- ATTITUDE SIMULATION ---
+                # Calculate turn rate (diff between current heading and target)
+                heading_diff = (target_heading - self.heading + 180) % 360 - 180
+                # Bank angle proportional to turn rate (clamped)
+                self.roll = max(-30, min(30, heading_diff * 2.0))
+                # Pitch down slightly when moving fast, pitch up (negative) to brake? 
+                # Let's say pitch = -5 deg (nose down) constant when moving
+                self.pitch = -5.0
+                
+                self.heading = target_heading
+                self.yaw = self.heading
 
         # --- STATE: SPIRALING ( shrinking orbit ) ---
         elif self.state == "SPIRALING":
@@ -125,7 +170,26 @@ class DroneState:
             self.lon = c_lon - (self.current_radius * math.cos(self.spiral_angle_rad))
             
             # Heading is tangent (perpendicular to radius)
-            self.heading = (math.degrees(self.spiral_angle_rad) + 90) % 360
+            target_heading = (math.degrees(self.spiral_angle_rad) + 90) % 360
+            
+            # --- ATTITUDE SIMULATION (Banking) ---
+            # Bank into the turn. Constant turn rate = constant bank angle.
+            # V = r * omega. tan(bank) = v^2 / (r*g) or just proportional to turn rate.
+            # Simple Hack: Bank 20 degrees for spiral
+            self.roll = 20.0 
+            self.heading = target_heading
+
+        # --- VALIDATION CLAMP ---
+        # Ensure we don't go underground or to space
+        if self.alt < self.MIN_ALT_M:
+            self.alt = self.MIN_ALT_M
+            # print("⚠️ [PHYSICS] Clamp: Altitude cannot be negative.")
+        elif self.alt > self.MAX_ALT_M:
+            self.alt = self.MAX_ALT_M
+            
+        # Basic Lat/Lon bounds
+        self.lat = max(self.CLAMP_LAT_BOUNDS[0], min(self.CLAMP_LAT_BOUNDS[1], self.lat))
+        self.lon = max(self.CLAMP_LON_BOUNDS[0], min(self.CLAMP_LON_BOUNDS[1], self.lon))
 
 # Singleton
 drone_state = DroneState()

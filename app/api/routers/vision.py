@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.infrastructure.vision.yolo_service import yolo_service
+from app.core.target_tracking import target_tracking_service
 
 router = APIRouter()
 
@@ -11,6 +12,10 @@ async def analyze_image(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         detections = await yolo_service.analyze_image(contents)
+        
+        # 3. Enrich with Geolocation using proper Attitude Compensation
+        for d in detections:
+            await target_tracking_service.update_target(d)
         
         return {
             "filename": file.filename,
