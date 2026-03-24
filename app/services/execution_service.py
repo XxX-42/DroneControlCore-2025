@@ -3,11 +3,13 @@ from datetime import datetime
 import json
 
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.core.drone_state import drone_state
 from app.core.settings import AppMode, settings
 from app.domain.mission import Mission, MissionStatus
 from app.domain.mission_execution import ExecutionStatus
+from app.infrastructure.database.db import AsyncSessionLocal
 from app.infrastructure.database.models import MissionExecutionModel, MissionModel
 from app.services.hardware_executor import hardware_executor
 from app.services.mission_state_machine import mission_state_machine
@@ -58,6 +60,33 @@ class ExecutionService:
             return False
         execution.trace_json = trace_json
         return True
+
+    async def flush_active_simulation_state(self) -> bool:
+        if not self.active_simulation_execution_id or not self.active_simulation_mission_id:
+            return False
+
+        async with AsyncSessionLocal() as session:
+            mission_result = await session.execute(
+                select(MissionModel).where(
+                    MissionModel.mission_uuid == self.active_simulation_mission_id
+                )
+            )
+            mission = mission_result.scalar_one_or_none()
+
+            execution_result = await session.execute(
+                select(MissionExecutionModel).where(
+                    MissionExecutionModel.execution_uuid == self.active_simulation_execution_id
+                )
+            )
+            execution = execution_result.scalar_one_or_none()
+
+            if mission is None or execution is None:
+                return False
+
+            changed = await self.reconcile_simulation_state(mission, execution)
+            if changed:
+                await session.commit()
+            return changed
 
     async def reconcile_simulation_state(self, mission: MissionModel, execution: MissionExecutionModel) -> bool:
         if execution.mode != AppMode.SIMULATION.value:

@@ -137,6 +137,10 @@
             <span>{{ replayPlaybackLabel }}</span>
             <span>{{ replayProgress }} / {{ replayTrace.length - 1 }}</span>
           </div>
+          <div class="replay-meta replay-stats">
+            <span>Points: {{ replayTrace.length }}</span>
+            <span>Span: {{ replayDurationLabel }}</span>
+          </div>
           <input
             v-model="replayProgress"
             class="timeline"
@@ -304,6 +308,15 @@ const replayPlaybackRoute = computed(() =>
 );
 const replayCursor = computed(() => replayTrace.value[replayProgress.value] || null);
 const replayPlaybackLabel = computed(() => (isReplayPlaying.value ? "PLAYING" : "PAUSED"));
+const replayDurationLabel = computed(() => {
+  if (replayTrace.value.length < 2) {
+    return "0s";
+  }
+  const start = new Date(replayTrace.value[0].timestamp).getTime();
+  const end = new Date(replayTrace.value[replayTrace.value.length - 1].timestamp).getTime();
+  const seconds = Math.max(0, Math.round((end - start) / 1000));
+  return `${seconds}s`;
+});
 const routeTypeLabel = computed(() => routeType.value.toUpperCase());
 const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
 const canResume = computed(() => currentExecutionStatus.value === "PAUSED");
@@ -799,6 +812,10 @@ h3 {
 .replay-meta {
   color: #fcd34d;
   font-size: 0.74rem;
+}
+
+.replay-stats {
+  color: #fde68a;
 }
 
 .timeline {

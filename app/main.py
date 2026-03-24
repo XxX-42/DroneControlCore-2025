@@ -15,6 +15,17 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+async def trace_flush_loop():
+    from app.services.execution_service import execution_service
+
+    try:
+        while True:
+            await execution_service.flush_active_simulation_state()
+            await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(
@@ -30,13 +41,19 @@ async def lifespan(app: FastAPI):
     from app.core.drone_state import drone_state
 
     physics_task = asyncio.create_task(drone_state.start_physics_loop())
+    trace_task = asyncio.create_task(trace_flush_loop())
 
     yield
 
     logger.info("Shutting down...")
     physics_task.cancel()
+    trace_task.cancel()
     try:
         await physics_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await trace_task
     except asyncio.CancelledError:
         pass
 
