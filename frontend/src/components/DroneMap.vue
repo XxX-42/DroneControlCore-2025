@@ -185,10 +185,10 @@
       <l-polyline
         v-if="hoverPreviewRoute.length > 1"
         :lat-lngs="hoverPreviewRoute"
-        color="#67e8f9"
-        :weight="3"
-        :opacity="0.65"
-        :dash-array="'10 8'"
+        color="#ef4444"
+        :weight="5"
+        :opacity="0.95"
+        :dash-array="'14 8'"
       />
 
       <l-polyline
@@ -243,8 +243,8 @@ import { useTelemetry } from "../composables/useTelemetry";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8090";
 const PLAN_CLICK_DEBOUNCE_MS = 250;
-const HOVER_PLAN_DEBOUNCE_MS = 140;
-const HOVER_PLAN_MIN_DELTA = 0.00018;
+const HOVER_PLAN_DEBOUNCE_MS = 70;
+const HOVER_PLAN_MIN_DELTA = 0.00006;
 const { droneState, isConnected } = useTelemetry();
 const locale = ref("zh");
 const navigationMode = ref("task");
@@ -637,6 +637,14 @@ const resolveTaskStartPoint = () => {
   return resolveTaskBaseStartPoint();
 };
 
+const resolveHoverPreviewStartPoint = () => {
+  if (navigationMode.value === "task" && taskTargets.value.length > 0) {
+    return taskTargets.value[taskTargets.value.length - 1];
+  }
+
+  return getCurrentDronePoint();
+};
+
 const rebuildTaskRoute = async (targets, startPoint) => {
   clearHoverPreview();
   resetRoutePlanning();
@@ -824,7 +832,7 @@ const onMapHover = (event) => {
       hoverPlanController.abort("hover-superseded");
     }
 
-    const startPoint = navigationMode.value === "task" ? resolveTaskStartPoint() : getCurrentDronePoint();
+    const startPoint = resolveHoverPreviewStartPoint();
     const controller = new AbortController();
     hoverPlanController = controller;
 
@@ -1137,6 +1145,9 @@ h3 {
   }
 }
 </style>
+
+
+
 
 
 
