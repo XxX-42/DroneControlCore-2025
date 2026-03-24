@@ -243,8 +243,8 @@ import { useTelemetry } from "../composables/useTelemetry";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8090";
 const PLAN_CLICK_DEBOUNCE_MS = 250;
-const HOVER_PLAN_DEBOUNCE_MS = 70;
-const HOVER_PLAN_MIN_DELTA = 0.00006;
+const HOVER_PLAN_DEBOUNCE_MS = 140;
+const HOVER_PLAN_MIN_DELTA = 0.00018;
 const { droneState, isConnected } = useTelemetry();
 const locale = ref("zh");
 const navigationMode = ref("task");
@@ -709,7 +709,7 @@ const removeTaskTarget = async (targetIndex) => {
 
   if (removedIsLast) {
     clearHoverPreview();
-  resetRoutePlanning();
+    resetRoutePlanning();
     targetPoint.value = null;
     statusMessage.value = "\u5df2\u5220\u9664\u6700\u540e\u4efb\u52a1\u70b9\uff0c\u65e0\u4eba\u673a\u5df2\u7acb\u5373\u505c\u6b62";
     return;
@@ -806,6 +806,7 @@ const clearHoverPreview = () => {
 
 const onMapHover = (event) => {
   const { lat, lng } = event.latlng;
+
   if (navigationMode.value === "task" && pendingTaskExecution.value && taskTargets.value.length > 0) {
     return;
   }
@@ -931,6 +932,7 @@ onBeforeUnmount(() => {
     clearTimeout(pendingPlanTimer.value);
     pendingPlanTimer.value = null;
   }
+  clearHoverPreview();
   stopReplayPlayback();
 });
 </script>
