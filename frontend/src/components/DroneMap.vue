@@ -141,13 +141,14 @@
           <span class="label">Replay Execution</span>
           <div class="execution-list">
             <button
-              v-for="execution in selectedReplayMission.executions"
+              v-for="execution in replayExecutions"
               :key="execution.execution_id"
               class="execution-item"
               :class="{ selected: selectedReplayExecutionId === execution.execution_id }"
               @click="selectReplayExecution(execution.execution_id)"
             >
               <span class="history-name">{{ shortId(execution.execution_id) }}</span>
+              <span class="history-meta">{{ executionSummaryLabel(execution) }}</span>
               <span class="history-meta">
                 {{ execution.status }} · {{ execution.mode }} · {{ formatTime(execution.started_at) }}
               </span>
@@ -190,14 +191,15 @@
         <div v-if="missionHistory.length === 0" class="history-empty">No mission history yet.</div>
         <div v-else class="history-list">
           <button
-            v-for="mission in missionHistory.slice(0, 6)"
+            v-for="mission in historyPreview"
             :key="mission.id"
             class="history-item"
             :class="{ selected: selectedReplayMissionId === mission.id }"
             @click="loadMissionDetail(mission.id)"
           >
             <span class="history-name">{{ mission.name }}</span>
-            <span class="history-meta">{{ mission.status }} · {{ formatTime(mission.timestamp) }}</span>
+            <span class="history-meta">{{ missionHistoryStatus(mission) }}</span>
+            <span class="history-meta">{{ missionHistoryTime(mission) }}</span>
           </button>
         </div>
       </div>
@@ -345,6 +347,18 @@ const routeTypeLabel = computed(() => routeType.value.toUpperCase());
 const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
 const canResume = computed(() => currentExecutionStatus.value === "PAUSED");
 const canCancel = computed(() => ["RUNNING", "PAUSED", "QUEUED"].includes(currentExecutionStatus.value));
+const replayExecutions = computed(() => [...selectedReplayMission.value.executions].sort((left, right) => {
+  const leftTime = new Date(left.started_at || left.ended_at || 0).getTime();
+  const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
+  return rightTime - leftTime;
+}));
+const historyPreview = computed(() => [...missionHistory.value]
+  .sort((left, right) => {
+    const leftTime = new Date((left.latest_execution && left.latest_execution.started_at) || left.timestamp || 0).getTime();
+    const rightTime = new Date((right.latest_execution && right.latest_execution.started_at) || right.timestamp || 0).getTime();
+    return rightTime - leftTime;
+  })
+  .slice(0, 6));
 
 const displayMarkers = computed(() => {
   const markers = [];
@@ -404,6 +418,34 @@ const formatTime = (isoString) => {
     return "UNKNOWN";
   }
   return new Date(isoString).toLocaleTimeString();
+};
+
+const formatDateTime = (isoString) => {
+  if (!isoString) {
+    return "UNKNOWN";
+  }
+  return new Date(isoString).toLocaleString();
+};
+
+const executionSummaryLabel = (execution) => {
+  const endLabel = execution.ended_at ? `end ${formatTime(execution.ended_at)}` : "active";
+  const tracePoints = Array.isArray(execution.trace) ? execution.trace.length : 0;
+  return `${endLabel} · ${tracePoints} pts`;
+};
+
+const missionHistoryStatus = (mission) => {
+  const latestExecution = mission.latest_execution || null;
+  if (!latestExecution) {
+    return mission.status || "UNKNOWN";
+  }
+  return `${mission.status} · ${latestExecution.status} · ${latestExecution.mode.toUpperCase()}`;
+};
+
+const missionHistoryTime = (mission) => {
+  const latestExecution = mission.latest_execution || null;
+  return latestExecution?.started_at
+    ? `Last run ${formatDateTime(latestExecution.started_at)}`
+    : formatDateTime(mission.timestamp);
 };
 
 const stopReplayPlayback = () => {
@@ -498,7 +540,11 @@ const applyMissionSnapshot = (mission) => {
   }
 
   if (Array.isArray(mission.executions) && mission.executions.length > 0) {
-    const latestExecution = mission.executions[mission.executions.length - 1];
+    const latestExecution = [...mission.executions].sort((left, right) => {
+      const leftTime = new Date(left.started_at || left.ended_at || 0).getTime();
+      const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
+      return rightTime - leftTime;
+    })[0];
     selectedReplayExecutionId.value = latestExecution.execution_id;
     replayTrace.value = normalizeReplayTrace(latestExecution.trace, mission.waypoints);
   } else {
