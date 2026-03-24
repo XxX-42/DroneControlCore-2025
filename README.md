@@ -1,123 +1,134 @@
 # DroneControlCore (2025)
 
+[English README](./README_EN.md)
+
 ![Python](https://img.shields.io/badge/Python-3.10-blue)
 ![Vue](https://img.shields.io/badge/Vue.js-3.0-green)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.95-teal)
-![YOLOv8](https://img.shields.io/badge/AI-YOLOv8-purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 
-## Introduction
+## 项目简介
 
-**DroneControlCore** is a next-generation, full-stack drone command and control system designed for autonomous operations. It integrates real-time telemetry visualization, AI-powered reconnaissance using computer vision, and intuitive mission planning into a unified interface. Built with a modern tech stack, it provides a robust foundation for both simulation and hardware deployment.
+**DroneControlCore** 是一个面向自主飞行控制的全栈无人机指挥与控制系统。当前项目重点覆盖：
 
-## Key Features
+- 实时遥测显示
+- 基于 OSM 的地图路径规划
+- 任务模式与实时模式混合编排
+- 任务历史与回放
+- 仿真模式下的完整联调
 
-*   **Real-time Telemetry Visualization**: Live tracking of drone position, heading, altitude, pitch, and roll via WebSocket telemetry.
-*   **Task Mode and Realtime Mode**: The frontend supports queued task planning and higher-priority realtime point insertion without losing the existing task order.
-*   **OSM Route Planning**: Click and hover interactions use OpenStreetMap road-network planning, including long-distance corridor loading for distant targets.
-*   **Hover OSM Preview**: In task mode, hover planning starts from the last queued task point; in realtime mode, it starts from the current drone position.
-*   **Editable Mission Queue**: Users can add, remove, renumber, and rebuild task points directly on the map.
-*   **Mission History Persistence**: SQLite-backed database stores missions and execution history for replay and review.
-*   **Simulation Mode**: Built-in backend simulation supports development and testing without physical hardware.
-*   **OSM Segment Cache**: Repeated planning of identical route segments is cached on the backend to reduce stalls during queue rebuilds.
+## 当前核心能力
 
-## Current Planning Rules
+- **实时遥测可视化**：通过 WebSocket 持续显示无人机位置、航向、高度、俯仰、横滚等状态。
+- **任务模式 / 实时模式**：支持任务队列式规划，也支持实时插点，不会破坏已有任务顺序。
+- **OSM 路径规划**：点击和悬停都可以走 OpenStreetMap 路网规划，远距离场景支持 corridor 范围规划。
+- **任务模式悬停 OSM**：任务模式下，悬停预览的起点固定为“当前序号最后一个任务点”。
+- **任务点可编辑**：支持增加、删除、重排任务点，删除后自动重建蓝色规划路线。
+- **任务历史与回放**：任务与执行记录持久化到 SQLite，可回放执行轨迹。
+- **仿真模式**：无需真实硬件即可完成前后端联调与任务执行验证。
+- **OSM 路段缓存**：后端会缓存相同起终点的重复规划结果，降低任务重建时的卡顿。
 
-### Task Mode
+## 当前规划规则
 
-*   Each click appends a new task point to the queue.
-*   Hover OSM preview starts from the last queued task point.
-*   Deleting a point rebuilds the remaining route from the current drone position or active execution position as appropriate.
+### 任务模式
 
-### Realtime Mode
+- 每次点击都会把新点追加到任务队列尾部。
+- 悬停 OSM 预览从当前“最后一个任务点”出发。
+- 删除任意任务点后，会按剩余点重新构建路线。
+- 刷新页面后，“起点”默认回到当前无人机实时位置。
 
-*   A realtime click does not discard the queued task points.
-*   The newest realtime point is inserted at the front of the queue and becomes the new `Task 1`.
-*   Existing task-mode points keep their relative order behind the inserted realtime point.
+### 实时模式
 
-### Refresh Behavior
+- 实时模式新增点不会清空原有任务队列。
+- 新增实时点会插到当前队列最前面，成为新的 `任务点 1`。
+- 原有任务模式点会整体后移，但相对顺序保持不变。
+- 如果在到达原任务点 1 之前再次新增实时点，最新实时点仍然会成为新的 `任务点 1`。
 
-*   After refreshing the browser, the start-point focus action uses the current drone position.
-*   Active execution state is restored from mission history when available.
+## 开发启动
 
-## Quick Start (Dev Mode)
+### 后端
 
-### Backend
+1. 进入项目根目录
+2. 激活虚拟环境：
 
-1.  Navigate to the project root.
-2.  Activate the virtual environment:
-    ```bash
-    venv\Scripts\activate
-    ```
-3.  Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  Start the API server:
+```powershell
+venv\Scripts\activate
+```
 
-    ```powershell
-    venv\Scripts\python -m uvicorn app.main:app --reload --port 8090
-    ```
-    *API will be available at `http://127.0.0.1:8090`*
+3. 安装依赖：
 
-### Frontend
+```powershell
+pip install -r requirements.txt
+```
 
-1.  Navigate to the frontend directory:
-    ```bash
-    cd frontend
-    ```
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-3.  Start the development server:
-    ```bash
-    npm run dev
-    ```
-    *Access the UI at `http://localhost:5173`*
+4. 启动 FastAPI：
 
-### Run Tests
+```powershell
+venv\Scripts\python -m uvicorn app.main:app --reload --port 8090
+```
 
-Backend integration tests:
+后端地址：
+
+- [http://127.0.0.1:8090](http://127.0.0.1:8090)
+- 文档：[http://127.0.0.1:8090/docs](http://127.0.0.1:8090/docs)
+
+### 前端
+
+1. 进入前端目录：
+
+```powershell
+cd frontend
+```
+
+2. 安装依赖：
+
+```powershell
+npm install
+```
+
+3. 启动开发服务：
+
+```powershell
+npm run dev
+```
+
+前端地址：
+
+- [http://127.0.0.1:5173](http://127.0.0.1:5173)
+
+## 测试命令
+
+### 后端导航相关测试
+
 ```powershell
 venv\Scripts\python -m pytest tests\integration\test_navigation_flow.py tests\integration\test_path_planner.py -q
 ```
 
-Frontend tests:
+### 前端测试
+
 ```powershell
 cd frontend
 npm test
 ```
 
-Frontend production build:
+### 前端构建
+
 ```powershell
 cd frontend
 npm run build
 ```
 
-### Version Control
+## Docker 部署
 
-To force push changes to the main branch:
-```bash
-git push -u -f origin main
+```powershell
+docker-compose up --build
 ```
 
-## Deployment (Docker)
+默认通过 `http://localhost` 访问。
 
-The entire system is containerized for easy deployment.
+## 项目结构
 
-1.  Ensure Docker and Docker Compose are installed.
-2.  Run the following command in the root directory:
-    ```bash
-    docker-compose up --build
-    ```
-3.  The application will be available at `http://localhost` (port 80).
-
-## Architecture
-
-DroneControlCore follows a **Clean Architecture** principle to ensure scalability and maintainability:
-
-*   **Domain Layer**: Defines core entities (`Mission`, `Waypoint`) and business logic, independent of external frameworks.
-*   **Infrastructure Layer**: Handles MAVSDK, SQLite, and OSM path planning/caching.
-*   **API Layer**: FastAPI routers expose mission, execution, navigation, and telemetry functionality via REST and WebSockets.
-*   **Frontend**: A Vue 3 map UI that coordinates telemetry, mission queue editing, replay, task-mode planning, and realtime insertion behavior.
+- **Domain Layer**：核心实体与业务状态定义，例如 `Mission`、`Waypoint`
+- **Infrastructure Layer**：MAVSDK、SQLite、OSM 路径规划与缓存
+- **API Layer**：FastAPI 路由，提供 mission / execution / navigation / telemetry 接口
+- **Frontend**：Vue 3 地图控制台，负责任务队列编辑、模式切换、回放与地图交互
