@@ -129,8 +129,30 @@
           <span class="history-count">{{ missionHistory.length }}</span>
         </div>
         <div v-if="selectedReplayMissionId" class="replay-banner">
-          <span>Replay: {{ shortId(selectedReplayMissionId) }}</span>
+          <span>
+            Replay: {{ shortId(selectedReplayMissionId) }}
+            <template v-if="selectedReplayExecutionId">
+              / {{ shortId(selectedReplayExecutionId) }}
+            </template>
+          </span>
           <button class="btn-ghost" @click="clearReplay">CLEAR REPLAY</button>
+        </div>
+        <div v-if="selectedReplayMission.executions.length > 0" class="execution-picker">
+          <span class="label">Replay Execution</span>
+          <div class="execution-list">
+            <button
+              v-for="execution in selectedReplayMission.executions"
+              :key="execution.execution_id"
+              class="execution-item"
+              :class="{ selected: selectedReplayExecutionId === execution.execution_id }"
+              @click="selectReplayExecution(execution.execution_id)"
+            >
+              <span class="history-name">{{ shortId(execution.execution_id) }}</span>
+              <span class="history-meta">
+                {{ execution.status }} · {{ execution.mode }} · {{ formatTime(execution.started_at) }}
+              </span>
+            </button>
+          </div>
         </div>
         <div v-if="replayTrace.length > 0" class="replay-controls">
           <div class="replay-meta">
@@ -282,6 +304,8 @@ const replayTrace = ref([]);
 const replayProgress = ref(0);
 const isReplayPlaying = ref(false);
 const selectedReplayMissionId = ref("");
+const selectedReplayExecutionId = ref("");
+const selectedReplayMission = ref({ id: "", executions: [] });
 const targetPoint = ref(null);
 const routeType = ref("direct");
 const dronePath = ref([]);
@@ -358,6 +382,22 @@ const displayMarkers = computed(() => {
 });
 
 const shortId = (value) => value.slice(0, 8).toUpperCase();
+
+const normalizeReplayTrace = (trace, fallbackWaypoints = []) => (
+  Array.isArray(trace) && trace.length > 0 ? trace : fallbackWaypoints
+);
+
+const applyReplayExecution = (executionId) => {
+  const execution = selectedReplayMission.value.executions.find(
+    (item) => item.execution_id === executionId,
+  );
+  if (!execution) {
+    return;
+  }
+  selectedReplayExecutionId.value = execution.execution_id;
+  replayTrace.value = normalizeReplayTrace(execution.trace, replayWaypoints.value);
+  statusMessage.value = `Replay execution ${shortId(execution.execution_id)} loaded`;
+};
 
 const formatTime = (isoString) => {
   if (!isoString) {
@@ -445,24 +485,24 @@ watch(replayTrace, () => {
 });
 
 const applyMissionSnapshot = (mission) => {
-  currentMissionId.value = mission.id || "";
-  currentMissionStatus.value = mission.status || "UNKNOWN";
+  selectedReplayMission.value = {
+    id: mission.id || "",
+    executions: Array.isArray(mission.executions) ? mission.executions : [],
+  };
+  selectedReplayMissionId.value = mission.id || "";
   if (Array.isArray(mission.waypoints) && mission.waypoints.length > 0) {
-    waypoints.value = mission.waypoints;
-    selectedReplayMissionId.value = mission.id || "";
+    replayWaypoints.value = mission.waypoints;
     targetPoint.value = mission.waypoints[mission.waypoints.length - 1];
+  } else {
+    replayWaypoints.value = [];
   }
 
   if (Array.isArray(mission.executions) && mission.executions.length > 0) {
     const latestExecution = mission.executions[mission.executions.length - 1];
-    currentExecutionId.value = latestExecution.execution_id;
-    currentExecutionStatus.value = latestExecution.status;
-    replayTrace.value = Array.isArray(latestExecution.trace) && latestExecution.trace.length > 0
-      ? latestExecution.trace
-      : mission.waypoints;
+    selectedReplayExecutionId.value = latestExecution.execution_id;
+    replayTrace.value = normalizeReplayTrace(latestExecution.trace, mission.waypoints);
   } else {
-    currentExecutionId.value = "";
-    currentExecutionStatus.value = "NONE";
+    selectedReplayExecutionId.value = "";
     replayTrace.value = mission.waypoints;
   }
 };
@@ -497,9 +537,17 @@ const loadMissionDetail = async (missionId) => {
   }
 };
 
+const selectReplayExecution = (executionId) => {
+  stopReplayPlayback();
+  applyReplayExecution(executionId);
+};
+
 const clearReplay = () => {
+  replayWaypoints.value = [];
   replayTrace.value = [];
   selectedReplayMissionId.value = "";
+  selectedReplayExecutionId.value = "";
+  selectedReplayMission.value = { id: "", executions: [] };
   statusMessage.value = "Replay cleared";
 };
 
@@ -547,6 +595,8 @@ const clearMission = () => {
   replayWaypoints.value = [];
   replayTrace.value = [];
   selectedReplayMissionId.value = "";
+  selectedReplayExecutionId.value = "";
+  selectedReplayMission.value = { id: "", executions: [] };
   targetPoint.value = null;
   routeType.value = "direct";
   planningError.value = "";
@@ -599,6 +649,7 @@ const uploadMission = async () => {
     replayWaypoints.value = waypoints.value;
     replayTrace.value = waypoints.value;
     selectedReplayMissionId.value = result.mission_id;
+    selectedReplayExecutionId.value = result.execution_id;
     statusMessage.value = result.message;
     await refreshHistory();
   } catch (error) {
@@ -790,10 +841,15 @@ h3 {
 }
 
 .btn-group,
-.history-list {
+.history-list,
+.execution-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.execution-picker {
+  margin-bottom: 10px;
 }
 
 .btn-row {
@@ -887,13 +943,15 @@ button:disabled {
   padding: 8px 0 4px;
 }
 
-.history-item {
+.history-item,
+.execution-item {
   text-align: left;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
-.history-item.selected {
+.history-item.selected,
+.execution-item.selected {
   border-color: rgba(251, 191, 36, 0.65);
   box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.25);
 }
