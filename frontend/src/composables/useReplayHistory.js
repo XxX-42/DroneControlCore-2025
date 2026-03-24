@@ -1,4 +1,5 @@
 import { computed, ref, watch } from "vue";
+import { fetchMissionDetail } from "../services/missionsApi";
 
 export function useReplayHistory({
   apiBaseUrl,
@@ -223,11 +224,7 @@ export function useReplayHistory({
   const loadMissionDetail = async (missionId) => {
     setControlError("");
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/missions/${missionId}`);
-      if (!response.ok) {
-        throw new Error("Failed to load mission detail");
-      }
-      const mission = await response.json();
+      const mission = await fetchMissionDetail(apiBaseUrl, missionId);
       applyMissionSnapshot(mission);
       setStatusMessage(`Replay loaded for ${mission.name}`);
       return mission;

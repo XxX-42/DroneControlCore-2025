@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { planNavigation } from "../services/navigationApi";
 
 export function useRoutePlanning({ apiBaseUrl, droneState, setStatusMessage }) {
   const waypoints = ref([]);
@@ -16,25 +17,12 @@ export function useRoutePlanning({ apiBaseUrl, droneState, setStatusMessage }) {
     isPlanning.value = true;
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/navigation/plan`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          start_latitude: droneState.value.lat,
-          start_longitude: droneState.value.lon,
-          target_latitude: targetLatitude,
-          target_longitude: targetLongitude,
-        }),
+      const result = await planNavigation(apiBaseUrl, {
+        start_latitude: droneState.value.lat,
+        start_longitude: droneState.value.lon,
+        target_latitude: targetLatitude,
+        target_longitude: targetLongitude,
       });
-
-      if (!response.ok) {
-        const errorPayload = await response.json().catch(() => ({}));
-        throw new Error(errorPayload.detail || "Route planning failed");
-      }
-
-      const result = await response.json();
       waypoints.value = result.waypoints;
       routeType.value = result.route_type;
       setStatusMessage(`Route planned via ${result.route_type.toUpperCase()}`);

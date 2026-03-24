@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { fetchMissionHistory, sendMissionExecutionAction, uploadMission as uploadMissionRequest } from "../services/missionsApi";
 
 export function useMissionControl(apiBaseUrl) {
   const missionHistory = ref([]);
@@ -20,11 +21,7 @@ export function useMissionControl(apiBaseUrl) {
   const refreshHistory = async () => {
     isRefreshingHistory.value = true;
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/missions/history`);
-      if (!response.ok) {
-        throw new Error("Failed to load mission history");
-      }
-      missionHistory.value = await response.json();
+      missionHistory.value = await fetchMissionHistory(apiBaseUrl);
     } catch (error) {
       controlError.value = error.message;
     } finally {
@@ -51,20 +48,7 @@ export function useMissionControl(apiBaseUrl) {
     };
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/missions/upload`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(missionPayload),
-      });
-
-      if (!response.ok) {
-        const errorPayload = await response.json().catch(() => ({}));
-        throw new Error(errorPayload.detail || "Upload failed");
-      }
-
-      const result = await response.json();
+      const result = await uploadMissionRequest(apiBaseUrl, missionPayload);
       currentMissionId.value = result.mission_id;
       currentExecutionId.value = result.execution_id;
       currentMissionStatus.value = result.mission_status;
@@ -90,17 +74,7 @@ export function useMissionControl(apiBaseUrl) {
     controlError.value = "";
 
     try {
-      const response = await fetch(
-        `${apiBaseUrl}/api/v1/missions/executions/${currentExecutionId.value}/${action}`,
-        { method: "POST" },
-      );
-
-      if (!response.ok) {
-        const errorPayload = await response.json().catch(() => ({}));
-        throw new Error(errorPayload.detail || `Failed to ${action} execution`);
-      }
-
-      const result = await response.json();
+      const result = await sendMissionExecutionAction(apiBaseUrl, currentExecutionId.value, action);
       currentMissionStatus.value = result.mission_status;
       currentExecutionStatus.value = result.execution_status;
       statusMessage.value = `Execution ${action} succeeded`;
