@@ -128,6 +128,17 @@
           <span>Recent Missions</span>
           <span class="history-count">{{ missionHistory.length }}</span>
         </div>
+        <div class="filter-row">
+          <button
+            v-for="option in missionFilterOptions"
+            :key="`mission-${option}`"
+            class="filter-chip"
+            :class="{ active: missionHistoryFilter === option }"
+            @click="missionHistoryFilter = option"
+          >
+            {{ option }}
+          </button>
+        </div>
         <div v-if="selectedReplayMissionId" class="replay-banner">
           <span>
             Replay: {{ shortId(selectedReplayMissionId) }}
@@ -139,6 +150,17 @@
         </div>
         <div v-if="selectedReplayMission.executions.length > 0" class="execution-picker">
           <span class="label">Replay Execution</span>
+          <div class="filter-row compact">
+            <button
+              v-for="option in executionFilterOptions"
+              :key="`execution-${option}`"
+              class="filter-chip"
+              :class="{ active: replayExecutionFilter === option }"
+              @click="replayExecutionFilter = option"
+            >
+              {{ option }}
+            </button>
+          </div>
           <div class="execution-list">
             <button
               v-for="execution in replayExecutions"
@@ -308,6 +330,10 @@ const isReplayPlaying = ref(false);
 const selectedReplayMissionId = ref("");
 const selectedReplayExecutionId = ref("");
 const selectedReplayMission = ref({ id: "", executions: [] });
+const missionFilterOptions = ["ALL", "ACTIVE", "COMPLETED", "FAILED", "CANCELLED"];
+const executionFilterOptions = ["ALL", "ACTIVE", "COMPLETED", "FAILED", "CANCELLED"];
+const missionHistoryFilter = ref("ALL");
+const replayExecutionFilter = ref("ALL");
 const targetPoint = ref(null);
 const routeType = ref("direct");
 const dronePath = ref([]);
@@ -347,12 +373,29 @@ const routeTypeLabel = computed(() => routeType.value.toUpperCase());
 const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
 const canResume = computed(() => currentExecutionStatus.value === "PAUSED");
 const canCancel = computed(() => ["RUNNING", "PAUSED", "QUEUED"].includes(currentExecutionStatus.value));
-const replayExecutions = computed(() => [...selectedReplayMission.value.executions].sort((left, right) => {
-  const leftTime = new Date(left.started_at || left.ended_at || 0).getTime();
-  const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
-  return rightTime - leftTime;
-}));
+const isActiveStatus = (status) => ["RUNNING", "PAUSED", "QUEUED", "EXECUTING"].includes(status || "");
+const matchesStatusFilter = (status, filter) => {
+  if (filter === "ALL") {
+    return true;
+  }
+  if (filter === "ACTIVE") {
+    return isActiveStatus(status);
+  }
+  return status === filter;
+};
+const replayExecutions = computed(() => [...selectedReplayMission.value.executions]
+  .filter((execution) => matchesStatusFilter(execution.status, replayExecutionFilter.value))
+  .sort((left, right) => {
+    const leftTime = new Date(left.started_at || left.ended_at || 0).getTime();
+    const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
+    return rightTime - leftTime;
+  }));
 const historyPreview = computed(() => [...missionHistory.value]
+  .filter((mission) => {
+    const latestExecution = mission.latest_execution || null;
+    const filterTarget = latestExecution?.status || mission.status;
+    return matchesStatusFilter(filterTarget, missionHistoryFilter.value);
+  })
   .sort((left, right) => {
     const leftTime = new Date((left.latest_execution && left.latest_execution.started_at) || left.timestamp || 0).getTime();
     const rightTime = new Date((right.latest_execution && right.latest_execution.started_at) || right.timestamp || 0).getTime();
@@ -524,6 +567,19 @@ watch(() => [droneState.value.lat, droneState.value.lon], ([newLat, newLon]) => 
 watch(replayTrace, () => {
   replayProgress.value = 0;
   stopReplayPlayback();
+});
+
+watch(replayExecutions, (executions) => {
+  if (executions.length === 0) {
+    selectedReplayExecutionId.value = "";
+    replayTrace.value = replayWaypoints.value;
+    return;
+  }
+
+  const stillSelected = executions.some((execution) => execution.execution_id === selectedReplayExecutionId.value);
+  if (!stillSelected) {
+    applyReplayExecution(executions[0].execution_id);
+  }
 });
 
 const applyMissionSnapshot = (mission) => {
@@ -898,6 +954,17 @@ h3 {
   margin-bottom: 10px;
 }
 
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.filter-row.compact {
+  margin: 8px 0;
+}
+
 .btn-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -980,6 +1047,21 @@ button:disabled {
 
 .btn-ghost:hover:not(:disabled) {
   background: rgba(14, 165, 233, 0.12);
+}
+
+.filter-chip {
+  background: rgba(15, 23, 42, 0.8);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 6px 9px;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+}
+
+.filter-chip.active {
+  background: rgba(14, 165, 233, 0.18);
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.42);
 }
 
 .history-empty {
