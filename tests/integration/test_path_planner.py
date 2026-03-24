@@ -100,3 +100,33 @@ async def test_ensure_graph_reuses_loaded_bbox_without_reload(monkeypatch):
 
     assert loaded is True
     assert load_calls == []
+
+
+@pytest.mark.asyncio
+async def test_plan_path_reuses_cached_route_for_identical_requests(monkeypatch):
+    planner = PathPlanner()
+    load_calls = []
+    calculate_calls = []
+
+    async def fake_load_graph_for_bbox(bbox):
+        load_calls.append(bbox)
+        planner.G = object()
+        planner.graph_bbox = bbox
+        return True
+
+    def fake_calculate_path(start_lat, start_lon, end_lat, end_lon):
+        calculate_calls.append((start_lat, start_lon, end_lat, end_lon))
+        return [
+            {"latitude": start_lat, "longitude": start_lon},
+            {"latitude": end_lat, "longitude": end_lon},
+        ]
+
+    monkeypatch.setattr(planner, "load_graph_for_bbox", fake_load_graph_for_bbox)
+    monkeypatch.setattr(planner, "calculate_path", fake_calculate_path)
+
+    first = await planner.plan_path(30.598, 103.991, 30.601, 103.995)
+    second = await planner.plan_path(30.598, 103.991, 30.601, 103.995)
+
+    assert first == second
+    assert len(load_calls) == 1
+    assert len(calculate_calls) == 1

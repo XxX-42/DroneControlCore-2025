@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import math
 from collections import OrderedDict
 from typing import Dict, List
@@ -14,6 +15,7 @@ class PathPlanner:
 
     DEFAULT_PADDING_M = 900
     MAX_GRAPH_CACHE_SIZE = 3
+    MAX_ROUTE_CACHE_SIZE = 256
 
     def __init__(self):
         self.G = None
@@ -27,6 +29,7 @@ class PathPlanner:
         )
         self.graph_bbox = None
         self.graph_cache = OrderedDict()
+        self.route_cache = OrderedDict()
         self._load_lock = asyncio.Lock()
         print("PathPlanner initialized. Map data pending...")
 
@@ -161,6 +164,48 @@ class PathPlanner:
     def bbox_cache_key(self, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
         return tuple(round(value, 3) for value in bbox)
 
+    def route_cache_key(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> tuple[float, float, float, float]:
+        return (
+            round(start_lat, 6),
+            round(start_lon, 6),
+            round(end_lat, 6),
+            round(end_lon, 6),
+        )
+
+    def get_cached_plan(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> Dict | None:
+        cache_key = self.route_cache_key(start_lat, start_lon, end_lat, end_lon)
+        cached_plan = self.route_cache.get(cache_key)
+        if cached_plan is None:
+            return None
+
+        self.route_cache.move_to_end(cache_key)
+        return copy.deepcopy(cached_plan)
+
+    def store_cached_plan(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+        plan: Dict,
+    ) -> None:
+        cache_key = self.route_cache_key(start_lat, start_lon, end_lat, end_lon)
+        self.route_cache[cache_key] = copy.deepcopy(plan)
+        while len(self.route_cache) > self.MAX_ROUTE_CACHE_SIZE:
+            self.route_cache.popitem(last=False)
+
     async def load_graph_for_bbox(self, bbox: tuple[float, float, float, float]) -> bool:
         async with self._load_lock:
             cache_key = self.bbox_cache_key(bbox)
@@ -285,6 +330,10 @@ class PathPlanner:
         end_lat: float,
         end_lon: float,
     ) -> Dict:
+        cached_plan = self.get_cached_plan(start_lat, start_lon, end_lat, end_lon)
+        if cached_plan is not None:
+            return cached_plan
+
         route = None
         route_type = "direct"
 
@@ -309,11 +358,13 @@ class PathPlanner:
 
         route[0]["is_user_target"] = False
         route[-1]["is_user_target"] = True
-        return {
+        plan = {
             "route_type": route_type,
             "fallback_used": route_type != "osm",
             "waypoints": route,
         }
+        self.store_cached_plan(start_lat, start_lon, end_lat, end_lon, plan)
+        return plan
 
 
 path_planner = PathPlanner()
