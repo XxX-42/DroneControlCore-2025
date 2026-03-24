@@ -49,6 +49,47 @@ def test_navigation_plan_endpoint_returns_route(monkeypatch):
     assert payload["waypoints"][-1]["is_user_target"] is True
 
 
+def test_navigation_graph_endpoint_returns_preview_tile(monkeypatch):
+    async def fake_get_preview_graph_tile(left, bottom, right, top, zoom_bucket):
+        return {
+            "tile_key": "14:preview",
+            "zoom_bucket": zoom_bucket,
+            "bbox": {
+                "left": left,
+                "bottom": bottom,
+                "right": right,
+                "top": top,
+            },
+            "nodes": [
+                {"id": "1", "lat": 30.598, "lon": 103.991},
+                {"id": "2", "lat": 30.6, "lon": 103.995},
+            ],
+            "edges": [
+                {"from": "1", "to": "2", "cost": 100.0},
+            ],
+        }
+
+    monkeypatch.setattr(path_planner, "get_preview_graph_tile", fake_get_preview_graph_tile)
+
+    response = client.post(
+        "/api/v1/navigation/graph",
+        json={
+            "left": 103.98,
+            "bottom": 30.59,
+            "right": 104.01,
+            "top": 30.61,
+            "zoom_bucket": 14,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["tile_key"] == "14:preview"
+    assert len(payload["nodes"]) == 2
+    assert payload["edges"][0]["from"] == "1"
+
+
 def test_mission_plan_builder_keeps_waypoint_order():
     service = MavsdkMissionService()
     mission = Mission(

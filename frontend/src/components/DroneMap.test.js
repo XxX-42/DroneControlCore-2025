@@ -1,4 +1,4 @@
-﻿import { computed, defineComponent, h, ref } from "vue";
+import { computed, defineComponent, h, ref } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,39 @@ let leafletMapMock;
 let scaleControlAddToMock;
 let scaleControlFactoryMock;
 let divIconMock;
-let planNavigationMock;
+let fetchNavigationGraphTileMock;
+let workerInstances;
+
+class MockWorker {
+  constructor() {
+    this.onmessage = null;
+    this.messages = [];
+    workerInstances.push(this);
+  }
+
+  postMessage(message) {
+    this.messages.push(message);
+
+    if (message.type === "computeRoute") {
+      this.onmessage?.({
+        data: {
+          type: "routeResult",
+          payload: {
+            requestId: message.payload.requestId,
+            status: "ok",
+            previewWaypoints: [
+              message.payload.startPoint,
+              message.payload.targetPoint,
+            ],
+            fallbackReason: "",
+          },
+        },
+      });
+    }
+  }
+
+  terminate() {}
+}
 
 vi.mock("leaflet", () => ({
   default: {
@@ -33,10 +65,6 @@ vi.mock("@vue-leaflet/vue-leaflet", () => {
           class: "map-click-trigger-first",
           onClick: () => emit("click", { latlng: { lat: 31.2304, lng: 121.4737 } }),
         }, "map-click"),
-        h("button", {
-          class: "map-click-trigger-second",
-          onClick: () => emit("click", { latlng: { lat: 30.5728, lng: 104.0668 } }),
-        }, "map-click-2"),
         h("button", {
           class: "map-hover-trigger",
           onClick: () => emit("mousemove", { latlng: { lat: 30.6012, lng: 104.0021 } }),
@@ -102,8 +130,8 @@ vi.mock("../composables/useDronePath", () => ({
   useDronePath: () => dronePathState,
 }));
 
-vi.mock("../services/navigationApi", () => ({
-  planNavigation: (...args) => planNavigationMock(...args),
+vi.mock("../services/navigationGraphApi", () => ({
+  fetchNavigationGraphTile: (...args) => fetchNavigationGraphTileMock(...args),
 }));
 
 const createMissionControlState = () => ({
@@ -125,8 +153,6 @@ const createMissionControlState = () => ({
   uploadMission: vi.fn().mockResolvedValue({
     mission_id: "mission-abcdef01",
     execution_id: "exec-abcdef01",
-    mission_status: "EXECUTING",
-    execution_status: "RUNNING",
   }),
   sendExecutionAction: vi.fn().mockResolvedValue({}),
   resetMissionControl: vi.fn(),
@@ -134,22 +160,19 @@ const createMissionControlState = () => ({
 
 const createReplayHistoryState = () => ({
   replayWaypoints: ref([]),
-  replayTrace: ref([
-    { latitude: 30.598, longitude: 103.991, timestamp: "2026-03-25T10:00:00Z" },
-    { latitude: 30.6, longitude: 103.995, timestamp: "2026-03-25T10:00:05Z" },
-  ]),
-  replayProgress: ref(1),
+  replayTrace: ref([]),
+  replayProgress: ref(0),
   isReplayPlaying: ref(false),
-  selectedReplayMissionId: ref("mission-1"),
-  selectedReplayExecutionId: ref("exec-1"),
-  selectedReplayMission: ref({ id: "mission-1", executions: [{ execution_id: "exec-1" }] }),
+  selectedReplayMissionId: ref(""),
+  selectedReplayExecutionId: ref(""),
+  selectedReplayMission: ref({ id: "", executions: [] }),
   missionFilterOptions: ["ALL"],
   executionFilterOptions: ["ALL"],
   missionHistoryFilter: ref("ALL"),
   replayExecutionFilter: ref("ALL"),
   replayPlaybackLabel: computed(() => "PAUSED"),
-  replayDurationLabel: computed(() => "5s"),
-  replayBannerLabel: computed(() => "Replay: MISSION01 / EXEC0001"),
+  replayDurationLabel: computed(() => "0s"),
+  replayBannerLabel: computed(() => ""),
   replayExecutionCards: computed(() => []),
   historyCards: computed(() => []),
   loadMissionDetail: vi.fn(),
@@ -168,17 +191,19 @@ const createRoutePlanningState = () => {
   const waypoints = ref([
     { latitude: 30.598, longitude: 103.991 },
     { latitude: 30.6, longitude: 103.995 },
-    { latitude: 30.603, longitude: 104.001 },
   ]);
 
   return {
     waypoints,
-    targetPoint: ref({ latitude: 30.603, longitude: 104.001 }),
+    targetPoint: ref({ latitude: 30.6, longitude: 103.995 }),
     isPlanning: ref(false),
     planningError: ref(""),
     plannedRoute: computed(() => waypoints.value.map((point) => [point.latitude, point.longitude])),
     routeTypeLabel: computed(() => "OSM"),
-    planRouteToTarget: vi.fn().mockResolvedValue({ route_type: "osm", waypoints: waypoints.value }),
+    planRouteToTarget: vi.fn().mockResolvedValue({
+      route_type: "osm",
+      waypoints: waypoints.value,
+    }),
     resetRoutePlanning: vi.fn(),
   };
 };
@@ -196,17 +221,39 @@ const getModeButtons = (wrapper) => wrapper.findAll(".mode-chip");
 describe("DroneMap", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    workerInstances = [];
     scaleControlAddToMock = vi.fn();
     scaleControlFactoryMock = vi.fn(() => ({ addTo: scaleControlAddToMock }));
     divIconMock = vi.fn((config) => config);
-    leafletMapMock = { getZoom: vi.fn(() => 16), on: vi.fn(), setView: vi.fn() };
-    planNavigationMock = vi.fn().mockResolvedValue({
-      route_type: "osm",
-      waypoints: [
-        { latitude: 30.598, longitude: 103.991 },
-        { latitude: 30.6012, longitude: 104.0021 },
+    leafletMapMock = {
+      getZoom: vi.fn(() => 16),
+      on: vi.fn(),
+      setView: vi.fn(),
+      getBounds: vi.fn(() => ({
+        getWest: () => 103.98,
+        getSouth: () => 30.59,
+        getEast: () => 104.01,
+        getNorth: () => 30.61,
+      })),
+    };
+    fetchNavigationGraphTileMock = vi.fn().mockResolvedValue({
+      tile_key: "16:test",
+      zoom_bucket: 16,
+      bbox: {
+        left: 103.98,
+        bottom: 30.59,
+        right: 104.01,
+        top: 30.61,
+      },
+      nodes: [
+        { id: "1", lat: 30.598, lon: 103.991 },
+        { id: "2", lat: 30.6012, lon: 104.0021 },
+      ],
+      edges: [
+        { from: "1", to: "2", cost: 100 },
       ],
     });
+    vi.stubGlobal("Worker", MockWorker);
 
     telemetryState = {
       droneState: ref({ lat: 30.598, lon: 103.991, alt: 120, heading: 90, pitch: 2.4, roll: -1.2 }),
@@ -219,78 +266,72 @@ describe("DroneMap", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
-  it("previews an OSM route while hovering before click", async () => {
+  it("previews a local graph route while hovering before click", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);
 
     await flushPromises();
     await wrapper.find(".map-hover-trigger").trigger("click");
-    await vi.advanceTimersByTimeAsync(140);
+    await vi.advanceTimersByTimeAsync(45);
     await flushPromises();
 
-    expect(planNavigationMock).toHaveBeenCalledWith(
-      expect.any(String),
+    expect(fetchNavigationGraphTileMock).toHaveBeenCalled();
+    expect(workerInstances[0].messages).toContainEqual(
       expect.objectContaining({
-        target_latitude: 30.6012,
-        target_longitude: 104.0021,
+        type: "computeRoute",
+        payload: expect.objectContaining({
+          targetPoint: { latitude: 30.6012, longitude: 104.0021 },
+        }),
       }),
-      expect.any(Object),
     );
-    expect(wrapper.findAll(".LPolyline-stub").length).toBeGreaterThanOrEqual(4);
+    expect(wrapper.findAll(".LPolyline-stub")).toHaveLength(3);
 
     await wrapper.find(".map-hover-leave-trigger").trigger("click");
     await flushPromises();
 
-    expect(wrapper.findAll(".LPolyline-stub")).toHaveLength(3);
+    expect(wrapper.findAll(".LPolyline-stub")).toHaveLength(2);
   });
 
-  it("debounces clicks and appends only the last target in task mode", async () => {
+  it("starts task hover preview from the last task target", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);
 
     await flushPromises();
     await wrapper.find(".map-click-trigger-first").trigger("click");
-    await wrapper.find(".map-click-trigger-second").trigger("click");
-
-    expect(routePlanningState.planRouteToTarget).not.toHaveBeenCalled();
-
     await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
 
-    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledTimes(1);
-    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledWith(
-      30.5728,
-      104.0668,
-      expect.objectContaining({ append: false }),
-    );
-    expect(missionControlState.uploadMission).not.toHaveBeenCalled();
+    await wrapper.find(".map-hover-trigger").trigger("click");
+    await vi.advanceTimersByTimeAsync(45);
+    await flushPromises();
+
+    const computeMessage = workerInstances[0].messages.find((message) => message.type === "computeRoute");
+    expect(computeMessage.payload.startPoint).toEqual({
+      latitude: 31.2304,
+      longitude: 121.4737,
+    });
   });
 
-  it("queues task mode execution until the active realtime mission finishes", async () => {
+  it("starts realtime hover preview from the current drone position", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);
 
     await flushPromises();
-
     await getModeButtons(wrapper)[1].trigger("click");
-    await wrapper.find(".map-click-trigger-first").trigger("click");
-    await vi.advanceTimersByTimeAsync(250);
-    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(1);
-
-    missionControlState.currentExecutionId.value = "exec-realtime-1";
-    missionControlState.currentExecutionStatus.value = "RUNNING";
+    await wrapper.find(".map-hover-trigger").trigger("click");
+    await vi.advanceTimersByTimeAsync(45);
     await flushPromises();
 
-    await getModeButtons(wrapper)[0].trigger("click");
-    await wrapper.find(".map-click-trigger-second").trigger("click");
-    await vi.advanceTimersByTimeAsync(250);
-    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(1);
-
-    missionControlState.currentExecutionStatus.value = "COMPLETED";
-    await flushPromises();
-
-    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(2);
+    const computeMessages = workerInstances[0].messages.filter((message) => message.type === "computeRoute");
+    const computeMessage = computeMessages[computeMessages.length - 1];
+    expect(computeMessage.payload.startPoint).toEqual({
+      latitude: 30.598,
+      longitude: 103.991,
+    });
   });
 });

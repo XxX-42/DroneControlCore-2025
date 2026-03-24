@@ -14,6 +14,14 @@ class PlanRequest(BaseModel):
     start_longitude: float | None = None
 
 
+class GraphRequest(BaseModel):
+    left: float
+    bottom: float
+    right: float
+    top: float
+    zoom_bucket: int = 14
+
+
 @router.post("/plan")
 async def plan_navigation(request: PlanRequest):
     start_lat = request.start_latitude if request.start_latitude is not None else drone_state.lat
@@ -42,4 +50,23 @@ async def plan_navigation(request: PlanRequest):
             "longitude": request.target_longitude,
         },
         "waypoints": plan["waypoints"],
+    }
+
+
+@router.post("/graph")
+async def preview_graph(request: GraphRequest):
+    try:
+        tile = await path_planner.get_preview_graph_tile(
+            request.left,
+            request.bottom,
+            request.right,
+            request.top,
+            request.zoom_bucket,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Preview graph loading failed: {exc}") from exc
+
+    return {
+        "status": "success",
+        **tile,
     }

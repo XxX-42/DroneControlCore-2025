@@ -229,7 +229,6 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { planNavigation } from "../services/navigationApi";
 import { LCircleMarker, LMap, LMarker, LPopup, LPolyline, LTileLayer } from "@vue-leaflet/vue-leaflet";
 
 import MissionControlPanel from "./drone-map/MissionControlPanel.vue";
@@ -240,11 +239,13 @@ import { useMissionControl } from "../composables/useMissionControl";
 import { useReplayHistory } from "../composables/useReplayHistory";
 import { useRoutePlanning } from "../composables/useRoutePlanning";
 import { useTelemetry } from "../composables/useTelemetry";
+import { buildGraphTileRequest, createPreviewGraphCache } from "../services/previewGraphCache";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8090";
 const PLAN_CLICK_DEBOUNCE_MS = 250;
-const HOVER_PLAN_DEBOUNCE_MS = 140;
-const HOVER_PLAN_MIN_DELTA = 0.00018;
+const HOVER_PLAN_INTERVAL_MS = 45;
+const HOVER_PLAN_MIN_DELTA = 0.00006;
+const PREFETCH_DRONE_MOVE_DELTA = 0.001;
 const { droneState, isConnected } = useTelemetry();
 const locale = ref("zh");
 const navigationMode = ref("task");
@@ -255,10 +256,16 @@ const hoverPlanTimer = ref(null);
 const hoverPreviewRoute = ref([]);
 const hoverPreviewTarget = ref(null);
 const lastHoverPoint = ref(null);
-let hoverPlanController = null;
 const lastTaskEndpoint = ref(null);
 const taskTargets = ref([]);
 const mapInstance = ref(null);
+const hoverPreviewRequestId = ref(0);
+const hoverWorker = ref(null);
+const lastPrefetchDronePoint = ref(null);
+const previewGraphCache = createPreviewGraphCache({
+  apiBaseUrl,
+  maxEntries: 5,
+});
 
 const zoom = ref(14);
 const currentZoom = ref(14);
@@ -568,6 +575,72 @@ const focusMap = (latitude, longitude, zoomLevel = 17) => {
   mapInstance.value.setView([latitude, longitude], zoomLevel);
 };
 
+const getMapBounds = () => {
+  if (!mapInstance.value || typeof mapInstance.value.getBounds !== "function") {
+    return null;
+  }
+
+  const bounds = mapInstance.value.getBounds();
+  return {
+    left: bounds.getWest(),
+    bottom: bounds.getSouth(),
+    right: bounds.getEast(),
+    top: bounds.getNorth(),
+  };
+};
+
+const syncHoverPreviewResult = (payload) => {
+  if (payload.requestId !== hoverPreviewRequestId.value) {
+    return;
+  }
+
+  hoverPreviewRoute.value = payload.status === "ok"
+    ? payload.previewWaypoints.map((point) => [point.latitude, point.longitude])
+    : [];
+};
+
+const createHoverWorker = () => {
+  if (typeof Worker === "undefined") {
+    return null;
+  }
+
+  const worker = new Worker(new URL("../workers/hoverPreviewWorker.js", import.meta.url), { type: "module" });
+  worker.onmessage = (event) => {
+    if (event.data?.type === "routeResult") {
+      syncHoverPreviewResult(event.data.payload);
+    }
+  };
+  return worker;
+};
+
+const ensurePreviewTile = async (startPoint, targetPoint) => {
+  const request = buildGraphTileRequest({
+    mapBounds: getMapBounds(),
+    zoom: currentZoom.value,
+    dronePoint: getCurrentDronePoint(),
+    startPoint,
+    targetPoint,
+  });
+
+  const tile = await previewGraphCache.ensureTile(request);
+  if (tile && hoverWorker.value) {
+    hoverWorker.value.postMessage({
+      type: "storeGraph",
+      payload: {
+        tileKey: tile.tile_key,
+        tile,
+      },
+    });
+  }
+
+  return tile;
+};
+
+const prefetchPreviewGraph = async (targetPoint = null) => {
+  const startPoint = resolveHoverPreviewStartPoint();
+  await ensurePreviewTile(startPoint, targetPoint || startPoint);
+};
+
 const onMapReady = (map) => {
   mapInstance.value = map;
   L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(map);
@@ -575,6 +648,14 @@ const onMapReady = (map) => {
   map.on("zoom", () => {
     currentZoom.value = map.getZoom();
   });
+  map.on("moveend", () => {
+    void prefetchPreviewGraph(hoverPreviewTarget.value);
+  });
+  map.on("zoomend", () => {
+    currentZoom.value = map.getZoom();
+    void prefetchPreviewGraph(hoverPreviewTarget.value);
+  });
+  void prefetchPreviewGraph();
 };
 
 const focusDeviceLocation = () => {
@@ -795,10 +876,7 @@ const clearHoverPreview = () => {
     clearTimeout(hoverPlanTimer.value);
     hoverPlanTimer.value = null;
   }
-  if (hoverPlanController) {
-    hoverPlanController.abort("hover-reset");
-    hoverPlanController = null;
-  }
+  hoverPreviewRequestId.value += 1;
   hoverPreviewRoute.value = [];
   hoverPreviewTarget.value = null;
   lastHoverPoint.value = null;
@@ -828,44 +906,36 @@ const onMapHover = (event) => {
 
   hoverPlanTimer.value = setTimeout(async () => {
     hoverPlanTimer.value = null;
-
-    if (hoverPlanController) {
-      hoverPlanController.abort("hover-superseded");
-    }
-
     const startPoint = resolveHoverPreviewStartPoint();
-    const controller = new AbortController();
-    hoverPlanController = controller;
+    const requestId = hoverPreviewRequestId.value + 1;
+    hoverPreviewRequestId.value = requestId;
 
     try {
-      const result = await planNavigation(
-        apiBaseUrl,
-        {
-          start_latitude: startPoint.latitude,
-          start_longitude: startPoint.longitude,
-          target_latitude: lat,
-          target_longitude: lng,
-        },
-        { signal: controller.signal },
-      );
-
-      if (hoverPlanController !== controller) {
+      const tile = await ensurePreviewTile(startPoint, { latitude: lat, longitude: lng });
+      if (!tile || requestId !== hoverPreviewRequestId.value) {
         return;
       }
 
-      hoverPreviewRoute.value = Array.isArray(result.waypoints)
-        ? result.waypoints.map((point) => [point.latitude, point.longitude])
-        : [];
+      if (!hoverWorker.value) {
+        hoverPreviewRoute.value = [];
+        return;
+      }
+
+      hoverWorker.value.postMessage({
+        type: "computeRoute",
+        payload: {
+          requestId,
+          graphTileKey: tile.tile_key,
+          startPoint,
+          targetPoint: { latitude: lat, longitude: lng },
+        },
+      });
     } catch (error) {
-      if (error.name !== "AbortError") {
+      if (requestId === hoverPreviewRequestId.value) {
         hoverPreviewRoute.value = [];
       }
-    } finally {
-      if (hoverPlanController === controller) {
-        hoverPlanController = null;
-      }
     }
-  }, HOVER_PLAN_DEBOUNCE_MS);
+  }, HOVER_PLAN_INTERVAL_MS);
 };
 
 const clearMission = () => {
@@ -899,8 +969,10 @@ const cancelExecution = async () => {
 };
 
 onMounted(async () => {
+  hoverWorker.value = createHoverWorker();
   await refreshHistory();
   syncLastTaskEndpointFromHistory();
+  await prefetchPreviewGraph();
 });
 
 watch(
@@ -927,12 +999,39 @@ watch(
   },
 );
 
+watch(
+  () => [droneState.value.lat, droneState.value.lon],
+  ([nextLat, nextLon]) => {
+    const previousPoint = lastPrefetchDronePoint.value;
+    const nextPoint = { latitude: nextLat, longitude: nextLon };
+    lastPrefetchDronePoint.value = nextPoint;
+
+    if (!previousPoint) {
+      void prefetchPreviewGraph(hoverPreviewTarget.value);
+      return;
+    }
+
+    if (
+      Math.abs(previousPoint.latitude - nextLat) >= PREFETCH_DRONE_MOVE_DELTA
+      || Math.abs(previousPoint.longitude - nextLon) >= PREFETCH_DRONE_MOVE_DELTA
+    ) {
+      void prefetchPreviewGraph(hoverPreviewTarget.value);
+    }
+  },
+  { immediate: true },
+);
+
 onBeforeUnmount(() => {
   if (pendingPlanTimer.value) {
     clearTimeout(pendingPlanTimer.value);
     pendingPlanTimer.value = null;
   }
   clearHoverPreview();
+  previewGraphCache.clear();
+  if (hoverWorker.value) {
+    hoverWorker.value.terminate();
+    hoverWorker.value = null;
+  }
   stopReplayPlayback();
 });
 </script>
