@@ -155,6 +155,8 @@ import { LCircleMarker, LMap, LMarker, LPopup, LPolyline, LTileLayer } from "@vu
 import MissionControlPanel from "./drone-map/MissionControlPanel.vue";
 import MissionHistoryPanel from "./drone-map/MissionHistoryPanel.vue";
 import TelemetryPanel from "./drone-map/TelemetryPanel.vue";
+import { useMissionControl } from "../composables/useMissionControl";
+import { useReplayHistory } from "../composables/useReplayHistory";
 import { useTelemetry } from "../composables/useTelemetry";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080";
@@ -163,35 +165,70 @@ const { droneState, isConnected } = useTelemetry();
 const zoom = ref(14);
 const currentZoom = ref(14);
 const waypoints = ref([]);
-const replayWaypoints = ref([]);
-const replayTrace = ref([]);
-const replayProgress = ref(0);
-const isReplayPlaying = ref(false);
-const selectedReplayMissionId = ref("");
-const selectedReplayExecutionId = ref("");
-const selectedReplayMission = ref({ id: "", executions: [] });
-const missionFilterOptions = ["ALL", "ACTIVE", "COMPLETED", "FAILED", "CANCELLED"];
-const executionFilterOptions = ["ALL", "ACTIVE", "COMPLETED", "FAILED", "CANCELLED"];
-const missionHistoryFilter = ref("ALL");
-const replayExecutionFilter = ref("ALL");
 const targetPoint = ref(null);
 const routeType = ref("direct");
 const dronePath = ref([]);
-const missionHistory = ref([]);
-const isUploading = ref(false);
 const isPlanning = ref(false);
-const isControlling = ref(false);
-const isRefreshingHistory = ref(false);
 const planningError = ref("");
-const controlError = ref("");
-const statusMessage = ref("");
-const pendingAction = ref("");
-const currentMissionId = ref("");
-const currentExecutionId = ref("");
-const currentMissionStatus = ref("IDLE");
-const currentExecutionStatus = ref("NONE");
 
-let replayTimer = null;
+const {
+  missionHistory,
+  isUploading,
+  isControlling,
+  isRefreshingHistory,
+  controlError,
+  statusMessage,
+  pendingAction,
+  currentMissionId,
+  currentExecutionId,
+  currentMissionStatus,
+  currentExecutionStatus,
+  canPause,
+  canResume,
+  canCancel,
+  refreshHistory,
+  uploadMission: uploadMissionRequest,
+  sendExecutionAction,
+  resetMissionControl,
+} = useMissionControl(apiBaseUrl);
+
+const {
+  replayWaypoints,
+  replayTrace,
+  replayProgress,
+  isReplayPlaying,
+  selectedReplayMissionId,
+  selectedReplayExecutionId,
+  selectedReplayMission,
+  missionFilterOptions,
+  executionFilterOptions,
+  missionHistoryFilter,
+  replayExecutionFilter,
+  replayPlaybackLabel,
+  replayDurationLabel,
+  replayBannerLabel,
+  replayExecutionCards,
+  historyCards,
+  loadMissionDetail,
+  selectReplayExecution,
+  clearReplay,
+  updateReplayProgress: setReplayProgress,
+  toggleReplayPlayback,
+  stepReplayBackward,
+  stepReplayForward,
+  stopReplayPlayback,
+  resetReplayHistory,
+  primeReplayFromUpload,
+} = useReplayHistory({
+  apiBaseUrl,
+  missionHistory,
+  setStatusMessage: (message) => {
+    statusMessage.value = message;
+  },
+  setControlError: (message) => {
+    controlError.value = message;
+  },
+});
 
 const plannedRoute = computed(() => waypoints.value.map((wp) => [wp.latitude, wp.longitude]));
 const replayRoute = computed(() => replayTrace.value.map((point) => [point.latitude, point.longitude]));
@@ -199,76 +236,9 @@ const replayPlaybackRoute = computed(() =>
   replayTrace.value.slice(0, replayProgress.value + 1).map((point) => [point.latitude, point.longitude]),
 );
 const replayCursor = computed(() => replayTrace.value[replayProgress.value] || null);
-const replayPlaybackLabel = computed(() => (isReplayPlaying.value ? "PLAYING" : "PAUSED"));
-const replayDurationLabel = computed(() => {
-  if (replayTrace.value.length < 2) {
-    return "0s";
-  }
-  const start = new Date(replayTrace.value[0].timestamp).getTime();
-  const end = new Date(replayTrace.value[replayTrace.value.length - 1].timestamp).getTime();
-  const seconds = Math.max(0, Math.round((end - start) / 1000));
-  return `${seconds}s`;
-});
 const routeTypeLabel = computed(() => routeType.value.toUpperCase());
-const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
-const canResume = computed(() => currentExecutionStatus.value === "PAUSED");
-const canCancel = computed(() => ["RUNNING", "PAUSED", "QUEUED"].includes(currentExecutionStatus.value));
 const currentMissionIdLabel = computed(() => currentMissionId.value ? shortId(currentMissionId.value) : "NONE");
 const currentExecutionIdLabel = computed(() => currentExecutionId.value ? shortId(currentExecutionId.value) : "NONE");
-const replayBannerLabel = computed(() => {
-  if (!selectedReplayMissionId.value) {
-    return "";
-  }
-  return selectedReplayExecutionId.value
-    ? `Replay: ${shortId(selectedReplayMissionId.value)} / ${shortId(selectedReplayExecutionId.value)}`
-    : `Replay: ${shortId(selectedReplayMissionId.value)}`;
-});
-
-const isActiveStatus = (status) => ["RUNNING", "PAUSED", "QUEUED", "EXECUTING"].includes(status || "");
-const matchesStatusFilter = (status, filter) => {
-  if (filter === "ALL") {
-    return true;
-  }
-  if (filter === "ACTIVE") {
-    return isActiveStatus(status);
-  }
-  return status === filter;
-};
-
-const replayExecutions = computed(() => [...selectedReplayMission.value.executions]
-  .filter((execution) => matchesStatusFilter(execution.status, replayExecutionFilter.value))
-  .sort((left, right) => {
-    const leftTime = new Date(left.started_at || left.ended_at || 0).getTime();
-    const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
-    return rightTime - leftTime;
-  }));
-
-const historyPreview = computed(() => [...missionHistory.value]
-  .filter((mission) => {
-    const latestExecution = mission.latest_execution || null;
-    const filterTarget = latestExecution?.status || mission.status;
-    return matchesStatusFilter(filterTarget, missionHistoryFilter.value);
-  })
-  .sort((left, right) => {
-    const leftTime = new Date((left.latest_execution && left.latest_execution.started_at) || left.timestamp || 0).getTime();
-    const rightTime = new Date((right.latest_execution && right.latest_execution.started_at) || right.timestamp || 0).getTime();
-    return rightTime - leftTime;
-  })
-  .slice(0, 6));
-
-const replayExecutionCards = computed(() => replayExecutions.value.map((execution) => ({
-  id: execution.execution_id,
-  title: shortId(execution.execution_id),
-  summary: executionSummaryLabel(execution),
-  detail: `${execution.status} · ${String(execution.mode || "unknown").toUpperCase()} · ${formatTime(execution.started_at)}`,
-})));
-
-const historyCards = computed(() => historyPreview.value.map((mission) => ({
-  id: mission.id,
-  name: mission.name,
-  statusLine: missionHistoryStatus(mission),
-  timeLine: missionHistoryTime(mission),
-})));
 
 const displayMarkers = computed(() => {
   const markers = [];
@@ -307,110 +277,8 @@ const displayMarkers = computed(() => {
 
 const shortId = (value) => value.slice(0, 8).toUpperCase();
 
-const normalizeReplayTrace = (trace, fallbackWaypoints = []) => (
-  Array.isArray(trace) && trace.length > 0 ? trace : fallbackWaypoints
-);
-
-const formatTime = (isoString) => {
-  if (!isoString) {
-    return "UNKNOWN";
-  }
-  return new Date(isoString).toLocaleTimeString();
-};
-
-const formatDateTime = (isoString) => {
-  if (!isoString) {
-    return "UNKNOWN";
-  }
-  return new Date(isoString).toLocaleString();
-};
-
-const executionSummaryLabel = (execution) => {
-  const endLabel = execution.ended_at ? `End ${formatTime(execution.ended_at)}` : "Active";
-  const tracePoints = Array.isArray(execution.trace) ? execution.trace.length : 0;
-  return `${endLabel} · ${tracePoints} pts`;
-};
-
-const missionHistoryStatus = (mission) => {
-  const latestExecution = mission.latest_execution || null;
-  if (!latestExecution) {
-    return mission.status || "UNKNOWN";
-  }
-  return `${mission.status} · ${latestExecution.status} · ${String(latestExecution.mode || "unknown").toUpperCase()}`;
-};
-
-const missionHistoryTime = (mission) => {
-  const latestExecution = mission.latest_execution || null;
-  return latestExecution?.started_at
-    ? `Last run ${formatDateTime(latestExecution.started_at)}`
-    : formatDateTime(mission.timestamp);
-};
-
-const applyReplayExecution = (executionId) => {
-  const execution = selectedReplayMission.value.executions.find(
-    (item) => item.execution_id === executionId,
-  );
-  if (!execution) {
-    return;
-  }
-  selectedReplayExecutionId.value = execution.execution_id;
-  replayTrace.value = normalizeReplayTrace(execution.trace, replayWaypoints.value);
-  statusMessage.value = `Replay execution ${shortId(execution.execution_id)} loaded`;
-};
-
-const stopReplayPlayback = () => {
-  if (replayTimer) {
-    clearInterval(replayTimer);
-    replayTimer = null;
-  }
-  isReplayPlaying.value = false;
-};
-
-const startReplayPlayback = () => {
-  if (replayTrace.value.length < 2) {
-    return;
-  }
-
-  if (replayProgress.value >= replayTrace.value.length - 1) {
-    replayProgress.value = 0;
-  }
-
-  stopReplayPlayback();
-  isReplayPlaying.value = true;
-  replayTimer = setInterval(() => {
-    if (replayProgress.value >= replayTrace.value.length - 1) {
-      stopReplayPlayback();
-      return;
-    }
-    replayProgress.value += 1;
-  }, 450);
-};
-
-const toggleReplayPlayback = () => {
-  if (isReplayPlaying.value) {
-    stopReplayPlayback();
-  } else {
-    startReplayPlayback();
-  }
-};
-
-const stepReplayForward = () => {
-  stopReplayPlayback();
-  if (replayProgress.value < replayTrace.value.length - 1) {
-    replayProgress.value += 1;
-  }
-};
-
-const stepReplayBackward = () => {
-  stopReplayPlayback();
-  if (replayProgress.value > 0) {
-    replayProgress.value -= 1;
-  }
-};
-
 const updateReplayProgress = (value) => {
-  stopReplayPlayback();
-  replayProgress.value = value;
+  setReplayProgress(value);
 };
 
 const onMapReady = (map) => {
@@ -435,96 +303,6 @@ watch(() => [droneState.value.lat, droneState.value.lon], ([newLat, newLon]) => 
     dronePath.value.shift();
   }
 });
-
-watch(replayTrace, () => {
-  replayProgress.value = 0;
-  stopReplayPlayback();
-});
-
-watch(replayExecutions, (executions) => {
-  if (executions.length === 0) {
-    selectedReplayExecutionId.value = "";
-    replayTrace.value = replayWaypoints.value;
-    return;
-  }
-
-  const stillSelected = executions.some((execution) => execution.execution_id === selectedReplayExecutionId.value);
-  if (!stillSelected) {
-    applyReplayExecution(executions[0].execution_id);
-  }
-});
-
-const applyMissionSnapshot = (mission) => {
-  selectedReplayMission.value = {
-    id: mission.id || "",
-    executions: Array.isArray(mission.executions) ? mission.executions : [],
-  };
-  selectedReplayMissionId.value = mission.id || "";
-
-  if (Array.isArray(mission.waypoints) && mission.waypoints.length > 0) {
-    replayWaypoints.value = mission.waypoints;
-    targetPoint.value = mission.waypoints[mission.waypoints.length - 1];
-  } else {
-    replayWaypoints.value = [];
-  }
-
-  if (Array.isArray(mission.executions) && mission.executions.length > 0) {
-    const latestExecution = [...mission.executions].sort((left, right) => {
-      const leftTime = new Date(left.started_at || left.ended_at || 0).getTime();
-      const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
-      return rightTime - leftTime;
-    })[0];
-    selectedReplayExecutionId.value = latestExecution.execution_id;
-    replayTrace.value = normalizeReplayTrace(latestExecution.trace, mission.waypoints);
-  } else {
-    selectedReplayExecutionId.value = "";
-    replayTrace.value = mission.waypoints;
-  }
-};
-
-const refreshHistory = async () => {
-  isRefreshingHistory.value = true;
-  try {
-    const response = await fetch(`${apiBaseUrl}/api/v1/missions/history`);
-    if (!response.ok) {
-      throw new Error("Failed to load mission history");
-    }
-    missionHistory.value = await response.json();
-  } catch (error) {
-    controlError.value = error.message;
-  } finally {
-    isRefreshingHistory.value = false;
-  }
-};
-
-const loadMissionDetail = async (missionId) => {
-  controlError.value = "";
-  try {
-    const response = await fetch(`${apiBaseUrl}/api/v1/missions/${missionId}`);
-    if (!response.ok) {
-      throw new Error("Failed to load mission detail");
-    }
-    const mission = await response.json();
-    applyMissionSnapshot(mission);
-    statusMessage.value = `Replay loaded for ${mission.name}`;
-  } catch (error) {
-    controlError.value = error.message;
-  }
-};
-
-const selectReplayExecution = (executionId) => {
-  stopReplayPlayback();
-  applyReplayExecution(executionId);
-};
-
-const clearReplay = () => {
-  replayWaypoints.value = [];
-  replayTrace.value = [];
-  selectedReplayMissionId.value = "";
-  selectedReplayExecutionId.value = "";
-  selectedReplayMission.value = { id: "", executions: [] };
-  statusMessage.value = "Replay cleared";
-};
 
 const onMapClick = async (event) => {
   const { lat, lng } = event.latlng;
@@ -567,103 +345,22 @@ const onMapClick = async (event) => {
 const clearMission = () => {
   stopReplayPlayback();
   waypoints.value = [];
-  replayWaypoints.value = [];
-  replayTrace.value = [];
-  selectedReplayMissionId.value = "";
-  selectedReplayExecutionId.value = "";
-  selectedReplayMission.value = { id: "", executions: [] };
+  resetReplayHistory();
   targetPoint.value = null;
   routeType.value = "direct";
   planningError.value = "";
-  controlError.value = "";
-  statusMessage.value = "";
   dronePath.value = [];
-  currentMissionId.value = "";
-  currentExecutionId.value = "";
-  currentMissionStatus.value = "IDLE";
-  currentExecutionStatus.value = "NONE";
+  resetMissionControl();
 };
 
 const uploadMission = async () => {
-  if (waypoints.value.length === 0) {
-    return;
-  }
-
-  isUploading.value = true;
-  controlError.value = "";
-
-  const missionPayload = {
-    name: `Mission ${new Date().toLocaleTimeString()}`,
-    waypoints: waypoints.value.map((wp) => ({
-      latitude: wp.latitude,
-      longitude: wp.longitude,
-      relative_altitude: 50.0,
-      speed_m_s: 10.0,
-    })),
-  };
-
-  try {
-    const response = await fetch(`${apiBaseUrl}/api/v1/missions/upload`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(missionPayload),
+  const result = await uploadMissionRequest(waypoints.value);
+  if (result) {
+    primeReplayFromUpload({
+      missionId: result.mission_id,
+      executionId: result.execution_id,
+      waypoints: waypoints.value,
     });
-
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}));
-      throw new Error(errorPayload.detail || "Upload failed");
-    }
-
-    const result = await response.json();
-    currentMissionId.value = result.mission_id;
-    currentExecutionId.value = result.execution_id;
-    currentMissionStatus.value = result.mission_status;
-    currentExecutionStatus.value = result.execution_status;
-    replayWaypoints.value = waypoints.value;
-    replayTrace.value = waypoints.value;
-    selectedReplayMissionId.value = result.mission_id;
-    selectedReplayExecutionId.value = result.execution_id;
-    statusMessage.value = result.message;
-    await refreshHistory();
-  } catch (error) {
-    controlError.value = error.message;
-  } finally {
-    isUploading.value = false;
-  }
-};
-
-const sendExecutionAction = async (action) => {
-  if (!currentExecutionId.value) {
-    return;
-  }
-
-  isControlling.value = true;
-  pendingAction.value = action;
-  controlError.value = "";
-
-  try {
-    const response = await fetch(
-      `${apiBaseUrl}/api/v1/missions/executions/${currentExecutionId.value}/${action}`,
-      { method: "POST" },
-    );
-
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}));
-      throw new Error(errorPayload.detail || `Failed to ${action} execution`);
-    }
-
-    const result = await response.json();
-    currentMissionStatus.value = result.mission_status;
-    currentExecutionStatus.value = result.execution_status;
-    statusMessage.value = `Execution ${action} succeeded`;
-    await refreshHistory();
-  } catch (error) {
-    controlError.value = error.message;
-  } finally {
-    isControlling.value = false;
-    pendingAction.value = "";
   }
 };
 
