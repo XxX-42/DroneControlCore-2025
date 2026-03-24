@@ -30,7 +30,7 @@ describe("useMissionControl", () => {
           execution_id: "exec-1",
           mission_status: "EXECUTING",
           execution_status: "RUNNING",
-          message: "uploaded",
+          message: "Mission '任务 01:28:19' accepted successfully",
         }),
       })
       .mockResolvedValueOnce({
@@ -45,6 +45,7 @@ describe("useMissionControl", () => {
     expect(missionControl.currentMissionId.value).toBe("mission-1");
     expect(missionControl.currentExecutionId.value).toBe("exec-1");
     expect(missionControl.currentExecutionStatus.value).toBe("RUNNING");
+    expect(missionControl.statusMessage.value).toBe("任务“任务 01:28:19”已成功接收");
   });
 
   it("sends execution action and refreshes state", async () => {
@@ -70,5 +71,6 @@ describe("useMissionControl", () => {
     expect(result.execution_status).toBe("PAUSED");
     expect(missionControl.currentMissionStatus.value).toBe("PAUSED");
     expect(missionControl.currentExecutionStatus.value).toBe("PAUSED");
+    expect(missionControl.statusMessage.value).toBe("执行暂停成功");
   });
 });

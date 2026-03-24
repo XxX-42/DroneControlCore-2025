@@ -1,5 +1,6 @@
 import asyncio
 import math
+from collections import OrderedDict
 from typing import Dict, List
 
 import networkx as nx
@@ -11,37 +12,135 @@ from app.core.settings import settings
 class PathPlanner:
     """Calculates obstacle-avoiding paths using the OpenStreetMap street network."""
 
+    DEFAULT_PADDING_M = 900
+    MAX_GRAPH_CACHE_SIZE = 3
+
     def __init__(self):
         self.G = None
         self.center_lat = settings.osm_center_lat
         self.center_lon = settings.osm_center_lon
+        self.default_radius_m = settings.osm_radius_m
+        self.default_bbox = self.build_point_bbox(
+            self.center_lat,
+            self.center_lon,
+            self.default_radius_m,
+        )
+        self.graph_bbox = None
+        self.graph_cache = OrderedDict()
         self._load_lock = asyncio.Lock()
-        self._load_attempted = False
         print("PathPlanner initialized. Map data pending...")
 
-    async def load_map_data(self):
-        """Downloads and caches the street network once per process."""
-        async with self._load_lock:
-            if self.G is not None or self._load_attempted:
-                return self.G is not None
+    def meters_to_latitude_delta(self, meters: float) -> float:
+        return meters / 111_320.0
 
-            self._load_attempted = True
-            print("Downloading OSM network for avoidance...")
+    def meters_to_longitude_delta(self, meters: float, latitude: float) -> float:
+        cos_lat = max(0.1, math.cos(math.radians(latitude)))
+        return meters / (111_320.0 * cos_lat)
+
+    def build_point_bbox(self, latitude: float, longitude: float, radius_m: float) -> tuple[float, float, float, float]:
+        lat_delta = self.meters_to_latitude_delta(radius_m)
+        lon_delta = self.meters_to_longitude_delta(radius_m, latitude)
+        return (
+            longitude - lon_delta,
+            latitude - lat_delta,
+            longitude + lon_delta,
+            latitude + lat_delta,
+        )
+
+    def build_corridor_bbox(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+        padding_m: float | None = None,
+    ) -> tuple[float, float, float, float]:
+        padding = padding_m or self.DEFAULT_PADDING_M
+        middle_lat = (start_lat + end_lat) / 2
+        lat_padding = self.meters_to_latitude_delta(padding)
+        lon_padding = self.meters_to_longitude_delta(padding, middle_lat)
+
+        return (
+            min(start_lon, end_lon) + (-lon_padding),
+            min(start_lat, end_lat) + (-lat_padding),
+            max(start_lon, end_lon) + lon_padding,
+            max(start_lat, end_lat) + lat_padding,
+        )
+
+    def bbox_contains_point(self, bbox: tuple[float, float, float, float], latitude: float, longitude: float) -> bool:
+        left, bottom, right, top = bbox
+        return left <= longitude <= right and bottom <= latitude <= top
+
+    def bbox_contains_route(
+        self,
+        bbox: tuple[float, float, float, float],
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> bool:
+        return (
+            self.bbox_contains_point(bbox, start_lat, start_lon)
+            and self.bbox_contains_point(bbox, end_lat, end_lon)
+        )
+
+    def bbox_cache_key(self, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+        return tuple(round(value, 3) for value in bbox)
+
+    async def load_graph_for_bbox(self, bbox: tuple[float, float, float, float]) -> bool:
+        async with self._load_lock:
+            cache_key = self.bbox_cache_key(bbox)
+            cached_graph = self.graph_cache.get(cache_key)
+            if cached_graph is not None:
+                self.G = cached_graph
+                self.graph_bbox = bbox
+                self.graph_cache.move_to_end(cache_key)
+                return True
+
             try:
-                self.G = await asyncio.to_thread(
-                    ox.graph_from_point,
-                    (self.center_lat, self.center_lon),
-                    dist=settings.osm_radius_m,
+                graph = await asyncio.to_thread(
+                    ox.graph_from_bbox,
+                    bbox=bbox,
                     network_type="walk",
                     retain_all=False,
                     simplify=True,
                 )
-                print("OSM Network loaded successfully.")
-                return True
             except Exception as exc:
-                print(f"OSM network unavailable, falling back to direct route: {exc}")
-                self.G = None
+                print(f"OSM network unavailable for bbox {bbox}, falling back to direct route: {exc}")
                 return False
+
+            self.G = graph
+            self.graph_bbox = bbox
+            self.graph_cache[cache_key] = graph
+            while len(self.graph_cache) > self.MAX_GRAPH_CACHE_SIZE:
+                self.graph_cache.popitem(last=False)
+            return True
+
+    async def ensure_graph_for_route(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> bool:
+        if self.G is not None and self.graph_bbox and self.bbox_contains_route(
+            self.graph_bbox,
+            start_lat,
+            start_lon,
+            end_lat,
+            end_lon,
+        ):
+            return True
+
+        target_bbox = self.default_bbox
+        if not self.bbox_contains_route(target_bbox, start_lat, start_lon, end_lat, end_lon):
+            target_bbox = self.build_corridor_bbox(start_lat, start_lon, end_lat, end_lon)
+
+        return await self.load_graph_for_bbox(target_bbox)
+
+    async def load_map_data(self):
+        """Downloads and caches the default street network once per process."""
+        return await self.load_graph_for_bbox(self.default_bbox)
 
     def calculate_path(self, start_lat, start_lon, end_lat, end_lon) -> List[Dict]:
         if self.G is None:
@@ -98,7 +197,7 @@ class PathPlanner:
         route = None
         route_type = "direct"
 
-        if await self.load_map_data():
+        if await self.ensure_graph_for_route(start_lat, start_lon, end_lat, end_lon):
             try:
                 route = self.calculate_path(start_lat, start_lon, end_lat, end_lon)
                 route_type = "osm"

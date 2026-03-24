@@ -71,7 +71,7 @@ describe("useReplayHistory", () => {
     expect(replayHistory.replayExecutionCards.value).toHaveLength(2);
     expect(replayHistory.replayExecutionCards.value[0].id).toBe("exec-newer");
     expect(replayHistory.historyCards.value[0].id).toBe("mission-1");
-    expect(setStatusMessage).toHaveBeenCalledWith("Replay loaded for Mission One");
+    expect(setStatusMessage).toHaveBeenCalledWith("已加载任务回放：Mission One");
   });
 
   it("filters replay executions by status and falls back selection", async () => {
@@ -133,6 +133,6 @@ describe("useReplayHistory", () => {
     expect(replayHistory.selectedReplayMissionId.value).toBe("");
     expect(replayHistory.selectedReplayExecutionId.value).toBe("");
     expect(replayHistory.replayTrace.value).toEqual([]);
-    expect(setStatusMessage).toHaveBeenCalledWith("Replay cleared");
+    expect(setStatusMessage).toHaveBeenCalledWith("已清空回放");
   });
 });

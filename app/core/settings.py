@@ -13,7 +13,7 @@ class AppMode(str, Enum):
 class Settings(BaseSettings):
     app_mode: AppMode = AppMode.SIMULATION
     api_host: str = "127.0.0.1"
-    api_port: int = 8080
+    api_port: int = 8090
     db_url: str = "sqlite+aiosqlite:///./drone.db"
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://127.0.0.1:5173", "http://127.0.0.1:5174"]

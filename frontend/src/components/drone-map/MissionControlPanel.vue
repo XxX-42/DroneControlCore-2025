@@ -2,9 +2,9 @@
   <div>
     <div class="panel-card">
       <div class="section-head">
-        <span>Current Mission</span>
+        <span>{{ labels.currentMission }}</span>
         <button class="btn-ghost" @click="$emit('refresh-history')" :disabled="isRefreshingHistory">
-          {{ isRefreshingHistory ? "SYNC..." : "SYNC" }}
+          {{ isRefreshingHistory ? labels.syncing : labels.sync }}
         </button>
       </div>
 
@@ -20,32 +20,32 @@
 
       <div class="btn-row">
         <button class="btn-secondary" @click="$emit('pause')" :disabled="!canPause || isControlling">
-          {{ isControlling && pendingAction === "pause" ? "PAUSING..." : "PAUSE" }}
+          {{ isControlling && pendingAction === "pause" ? labels.pausing : labels.pause }}
         </button>
         <button class="btn-secondary" @click="$emit('resume')" :disabled="!canResume || isControlling">
-          {{ isControlling && pendingAction === "resume" ? "RESUMING..." : "RESUME" }}
+          {{ isControlling && pendingAction === "resume" ? labels.resuming : labels.resume }}
         </button>
         <button class="btn-danger" @click="$emit('cancel')" :disabled="!canCancel || isControlling">
-          {{ isControlling && pendingAction === "cancel" ? "CANCELLING..." : "CANCEL" }}
+          {{ isControlling && pendingAction === "cancel" ? labels.cancelling : labels.cancel }}
         </button>
       </div>
     </div>
 
     <div class="action-area panel-card">
-      <p v-if="isPlanning" class="hint">Planning route...</p>
+      <p v-if="isPlanning" class="hint">{{ labels.planning }}</p>
       <p v-else-if="planningError" class="hint hint-error">{{ planningError }}</p>
-      <p v-else-if="waypointCount === 0" class="hint">Click map to auto-plan route</p>
-      <p v-else class="hint">Planned route: {{ waypointCount }} nodes</p>
+      <p v-else-if="waypointCount === 0" class="hint">{{ labels.clickMap }}</p>
+      <p v-else class="hint">{{ labels.plannedRoute(waypointCount) }}</p>
 
       <div class="btn-group">
         <button
           @click="$emit('upload-mission')"
           :disabled="waypointCount === 0 || isUploading || isPlanning || isControlling"
         >
-          {{ isUploading ? "UPLOADING..." : "UPLOAD MISSION" }}
+          {{ isUploading ? labels.uploading : labels.uploadMission }}
         </button>
         <button class="btn-danger" @click="$emit('clear-mission')">
-          CLEAR
+          {{ labels.clear }}
         </button>
       </div>
     </div>
@@ -120,15 +120,88 @@ const props = defineProps({
     type: Boolean,
     required: true,
   },
+  locale: {
+    type: String,
+    default: "zh",
+  },
 });
 
 defineEmits(["refresh-history", "pause", "resume", "cancel", "upload-mission", "clear-mission"]);
 
+const I18N = {
+  zh: {
+    currentMission: "\u5f53\u524d\u4efb\u52a1",
+    sync: "\u540c\u6b65",
+    syncing: "\u540c\u6b65\u4e2d...",
+    pause: "\u6682\u505c",
+    pausing: "\u6682\u505c\u4e2d...",
+    resume: "\u7ee7\u7eed",
+    resuming: "\u7ee7\u7eed\u4e2d...",
+    cancel: "\u53d6\u6d88",
+    cancelling: "\u53d6\u6d88\u4e2d...",
+    planning: "\u6b63\u5728\u89c4\u5212\u8def\u7ebf...",
+    clickMap: "\u70b9\u51fb\u5730\u56fe\u81ea\u52a8\u89c4\u5212\u8def\u7ebf",
+    plannedRoute: (count) => `\u5df2\u89c4\u5212\u8def\u7ebf\uff1a${count} \u4e2a\u8282\u70b9`,
+    uploading: "\u4e0a\u4f20\u4e2d...",
+    uploadMission: "\u4e0a\u4f20\u4efb\u52a1",
+    clear: "\u6e05\u7a7a",
+    mission: "\u4efb\u52a1",
+    execution: "\u6267\u884c",
+    missionState: "\u4efb\u52a1\u72b6\u6001",
+    execState: "\u6267\u884c\u72b6\u6001",
+  },
+  en: {
+    currentMission: "Current Mission",
+    sync: "SYNC",
+    syncing: "SYNC...",
+    pause: "PAUSE",
+    pausing: "PAUSING...",
+    resume: "RESUME",
+    resuming: "RESUMING...",
+    cancel: "CANCEL",
+    cancelling: "CANCELLING...",
+    planning: "Planning route...",
+    clickMap: "Click map to auto-plan route",
+    plannedRoute: (count) => `Planned route: ${count} nodes`,
+    uploading: "UPLOADING...",
+    uploadMission: "UPLOAD MISSION",
+    clear: "CLEAR",
+    mission: "Mission",
+    execution: "Execution",
+    missionState: "Mission State",
+    execState: "Exec State",
+  },
+};
+
+const labels = computed(() => I18N[props.locale] || I18N.zh);
+const statusLabelMap = {
+  IDLE: "\u7a7a\u95f2",
+  NONE: "\u65e0",
+  EXECUTING: "\u6267\u884c\u4e2d",
+  RUNNING: "\u8fd0\u884c\u4e2d",
+  PAUSED: "\u5df2\u6682\u505c",
+  QUEUED: "\u5df2\u6392\u961f",
+  COMPLETED: "\u5df2\u5b8c\u6210",
+  FAILED: "\u5931\u8d25",
+  CANCELLED: "\u5df2\u53d6\u6d88",
+};
+const formatMissionValue = (label, value) => {
+  if (props.locale !== "zh") {
+    return value;
+  }
+
+  if (label === labels.value.missionState || label === labels.value.execState) {
+    return statusLabelMap[value] || value;
+  }
+
+  return value;
+};
+
 const missionItems = computed(() => [
-  { label: "Mission", value: props.currentMissionIdLabel },
-  { label: "Execution", value: props.currentExecutionIdLabel },
-  { label: "Mission State", value: props.currentMissionStatus },
-  { label: "Exec State", value: props.currentExecutionStatus },
+  { label: labels.value.mission, value: formatMissionValue(labels.value.mission, props.currentMissionIdLabel) },
+  { label: labels.value.execution, value: formatMissionValue(labels.value.execution, props.currentExecutionIdLabel) },
+  { label: labels.value.missionState, value: formatMissionValue(labels.value.missionState, props.currentMissionStatus) },
+  { label: labels.value.execState, value: formatMissionValue(labels.value.execState, props.currentExecutionStatus) },
 ]);
 </script>
 

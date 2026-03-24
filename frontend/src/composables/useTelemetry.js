@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 
 export function useTelemetry() {
-    const telemetryBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://127.0.0.1:8080';
+    const telemetryBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://127.0.0.1:8090';
     const droneState = ref({
         lat: 30.598,
         lon: 103.991,

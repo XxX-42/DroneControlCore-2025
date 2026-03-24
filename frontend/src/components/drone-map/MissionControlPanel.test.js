@@ -20,6 +20,7 @@ const baseProps = {
   planningError: "",
   waypointCount: 3,
   isUploading: false,
+  locale: "en",
 };
 
 describe("MissionControlPanel", () => {
@@ -75,5 +76,19 @@ describe("MissionControlPanel", () => {
     expect(wrapper.text()).toContain("Route planned");
     expect(wrapper.text()).toContain("Control failed");
     expect(wrapper.text()).toContain("Planning route...");
+  });
+
+  it("renders chinese labels and translated statuses in zh locale", () => {
+    const wrapper = mount(MissionControlPanel, {
+      props: {
+        ...baseProps,
+        locale: "zh",
+      },
+    });
+
+    expect(wrapper.text()).toContain("当前任务");
+    expect(wrapper.text()).toContain("上传任务");
+    expect(wrapper.text()).toContain("执行中");
+    expect(wrapper.text()).toContain("运行中");
   });
 });

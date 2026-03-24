@@ -38,7 +38,7 @@ describe("useRoutePlanning", () => {
       [30.5, 103.9],
       [30.6, 104.0],
     ]);
-    expect(setStatusMessage).toHaveBeenCalledWith("Route planned via OSM");
+    expect(setStatusMessage).toHaveBeenCalledWith("路线规划完成（OSM）");
   });
 
   it("handles planning failure and resets route type", async () => {

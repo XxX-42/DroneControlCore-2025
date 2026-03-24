@@ -1,7 +1,7 @@
 <template>
   <div class="panel-card">
     <div class="section-head">
-      <span>Recent Missions</span>
+      <span>{{ labels.recentMissions }}</span>
       <span class="history-count">{{ missionCount }}</span>
     </div>
 
@@ -13,17 +13,17 @@
         :class="{ active: missionHistoryFilter === option }"
         @click="$emit('update:mission-history-filter', option)"
       >
-        {{ option }}
+        {{ filterLabel(option) }}
       </button>
     </div>
 
     <div v-if="replayBannerLabel" class="replay-banner">
       <span>{{ replayBannerLabel }}</span>
-      <button class="btn-ghost" @click="$emit('clear-replay')">CLEAR REPLAY</button>
+      <button class="btn-ghost" @click="$emit('clear-replay')">{{ labels.clearReplay }}</button>
     </div>
 
     <div v-if="selectedReplayMission.executions.length > 0" class="execution-picker">
-      <span class="label">Replay Execution</span>
+      <span class="label">{{ labels.replayExecution }}</span>
       <div class="filter-row compact">
         <button
           v-for="option in executionFilterOptions"
@@ -32,7 +32,7 @@
           :class="{ active: replayExecutionFilter === option }"
           @click="$emit('update:replay-execution-filter', option)"
         >
-          {{ option }}
+          {{ filterLabel(option) }}
         </button>
       </div>
 
@@ -57,8 +57,8 @@
         <span>{{ replayProgress }} / {{ replayTraceLength - 1 }}</span>
       </div>
       <div class="replay-meta replay-stats">
-        <span>Points: {{ replayTraceLength }}</span>
-        <span>Span: {{ replayDurationLabel }}</span>
+        <span>{{ labels.points }}: {{ replayTraceLength }}</span>
+        <span>{{ labels.span }}: {{ replayDurationLabel }}</span>
       </div>
       <input
         :value="replayProgress"
@@ -71,25 +71,25 @@
       >
       <div class="btn-row replay-actions">
         <button class="btn-secondary" @click="$emit('toggle-replay')">
-          {{ isReplayPlaying ? "PAUSE PLAYBACK" : "PLAY REPLAY" }}
+          {{ isReplayPlaying ? labels.pausePlayback : labels.playReplay }}
         </button>
         <button class="btn-ghost" @click="$emit('step-replay-backward')" :disabled="replayProgress <= 0">
-          BACK
+          {{ labels.back }}
         </button>
         <button
           class="btn-ghost"
           @click="$emit('step-replay-forward')"
           :disabled="replayProgress >= replayTraceLength - 1"
         >
-          NEXT
+          {{ labels.next }}
         </button>
       </div>
     </div>
 
-    <div v-if="historyCards.length === 0" class="history-empty">No mission history yet.</div>
+    <div v-if="historyCards.length === 0" class="history-empty">{{ labels.noHistory }}</div>
     <div v-else class="history-list">
       <button
-        v-for="mission in historyCards"
+        v-for="mission in visibleHistoryCards"
         :key="mission.id"
         class="history-item"
         :class="{ selected: selectedReplayMissionId === mission.id }"
@@ -100,11 +100,22 @@
         <span class="history-meta">{{ mission.timeLine }}</span>
       </button>
     </div>
+
+    <button
+      v-if="canToggleHistory"
+      class="btn-ghost history-toggle"
+      type="button"
+      @click="isHistoryExpanded = !isHistoryExpanded"
+    >
+      {{ isHistoryExpanded ? labels.collapseHistory : labels.expandHistory }}
+    </button>
   </div>
 </template>
 
 <script setup>
-defineProps({
+import { computed, ref, watch } from "vue";
+
+const props = defineProps({
   missionCount: {
     type: Number,
     required: true,
@@ -169,6 +180,10 @@ defineProps({
     type: String,
     default: "",
   },
+  locale: {
+    type: String,
+    default: "zh",
+  },
 });
 
 defineEmits([
@@ -182,6 +197,66 @@ defineEmits([
   "step-replay-forward",
   "load-mission-detail",
 ]);
+
+const I18N = {
+  zh: {
+    recentMissions: "\u6700\u8fd1\u4efb\u52a1",
+    clearReplay: "\u6e05\u7a7a\u56de\u653e",
+    expandHistory: "\u5c55\u5f00",
+    collapseHistory: "\u6536\u8d77",
+    replayExecution: "\u56de\u653e\u6267\u884c",
+    points: "\u70b9\u4f4d",
+    span: "\u65f6\u957f",
+    playReplay: "\u64ad\u653e\u56de\u653e",
+    pausePlayback: "\u6682\u505c\u56de\u653e",
+    back: "\u540e\u9000",
+    next: "\u524d\u8fdb",
+    noHistory: "\u6682\u65e0\u4efb\u52a1\u5386\u53f2\u3002",
+    filters: {
+      ALL: "\u5168\u90e8",
+      ACTIVE: "\u8fdb\u884c\u4e2d",
+      COMPLETED: "\u5df2\u5b8c\u6210",
+      FAILED: "\u5931\u8d25",
+      CANCELLED: "\u5df2\u53d6\u6d88",
+    },
+  },
+  en: {
+    recentMissions: "Recent Missions",
+    clearReplay: "CLEAR REPLAY",
+    expandHistory: "EXPAND",
+    collapseHistory: "COLLAPSE",
+    replayExecution: "Replay Execution",
+    points: "Points",
+    span: "Span",
+    playReplay: "PLAY REPLAY",
+    pausePlayback: "PAUSE PLAYBACK",
+    back: "BACK",
+    next: "NEXT",
+    noHistory: "No mission history yet.",
+    filters: {
+      ALL: "ALL",
+      ACTIVE: "ACTIVE",
+      COMPLETED: "COMPLETED",
+      FAILED: "FAILED",
+      CANCELLED: "CANCELLED",
+    },
+  },
+};
+
+const labels = computed(() => I18N[props.locale] || I18N.zh);
+const filterLabel = (option) => labels.value.filters[option] || option;
+const isHistoryExpanded = ref(false);
+const visibleHistoryCards = computed(() => (
+  isHistoryExpanded.value ? props.historyCards : props.historyCards.slice(0, 1)
+));
+const canToggleHistory = computed(() => props.historyCards.length > 1);
+
+watch(
+  () => props.historyCards,
+  () => {
+    isHistoryExpanded.value = false;
+  },
+);
 </script>
 
 <style scoped>
@@ -327,6 +402,11 @@ button:disabled {
   font-size: 0.8rem;
   text-align: center;
   padding: 8px 0 4px;
+}
+
+.history-toggle {
+  width: 100%;
+  margin-top: 10px;
 }
 
 .history-item,

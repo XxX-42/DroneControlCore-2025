@@ -25,7 +25,7 @@ export function useRoutePlanning({ apiBaseUrl, droneState, setStatusMessage }) {
       });
       waypoints.value = result.waypoints;
       routeType.value = result.route_type;
-      setStatusMessage(`Route planned via ${result.route_type.toUpperCase()}`);
+      setStatusMessage(`\u8def\u7ebf\u89c4\u5212\u5b8c\u6210\uff08${result.route_type.toUpperCase()}\uff09`);
       return result;
     } catch (error) {
       waypoints.value = [];

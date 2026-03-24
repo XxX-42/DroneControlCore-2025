@@ -17,6 +17,24 @@ export function useMissionControl(apiBaseUrl) {
   const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
   const canResume = computed(() => currentExecutionStatus.value === "PAUSED");
   const canCancel = computed(() => ["RUNNING", "PAUSED", "QUEUED"].includes(currentExecutionStatus.value));
+  const actionLabelMap = {
+    pause: "\u6682\u505c",
+    resume: "\u7ee7\u7eed",
+    cancel: "\u53d6\u6d88",
+  };
+
+  const translateMissionMessage = (message) => {
+    if (!message) {
+      return "";
+    }
+
+    const acceptedMatch = message.match(/^Mission '(.+)' accepted successfully$/);
+    if (acceptedMatch) {
+      return `\u4efb\u52a1\u201c${acceptedMatch[1]}\u201d\u5df2\u6210\u529f\u63a5\u6536`;
+    }
+
+    return message;
+  };
 
   const refreshHistory = async () => {
     isRefreshingHistory.value = true;
@@ -38,7 +56,7 @@ export function useMissionControl(apiBaseUrl) {
     controlError.value = "";
 
     const missionPayload = {
-      name: `Mission ${new Date().toLocaleTimeString()}`,
+      name: `\u4efb\u52a1 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`,
       waypoints: waypoints.map((wp) => ({
         latitude: wp.latitude,
         longitude: wp.longitude,
@@ -53,7 +71,7 @@ export function useMissionControl(apiBaseUrl) {
       currentExecutionId.value = result.execution_id;
       currentMissionStatus.value = result.mission_status;
       currentExecutionStatus.value = result.execution_status;
-      statusMessage.value = result.message;
+      statusMessage.value = translateMissionMessage(result.message);
       await refreshHistory();
       return result;
     } catch (error) {
@@ -77,7 +95,7 @@ export function useMissionControl(apiBaseUrl) {
       const result = await sendMissionExecutionAction(apiBaseUrl, currentExecutionId.value, action);
       currentMissionStatus.value = result.mission_status;
       currentExecutionStatus.value = result.execution_status;
-      statusMessage.value = `Execution ${action} succeeded`;
+      statusMessage.value = `\u6267\u884c${actionLabelMap[action] || action}\u6210\u529f`;
       await refreshHistory();
       return result;
     } catch (error) {

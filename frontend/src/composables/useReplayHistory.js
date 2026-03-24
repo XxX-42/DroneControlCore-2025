@@ -21,20 +21,52 @@ export function useReplayHistory({
 
   let replayTimer = null;
 
+  const statusLabelMap = {
+    IDLE: "\u7a7a\u95f2",
+    NONE: "\u65e0",
+    EXECUTING: "\u6267\u884c\u4e2d",
+    RUNNING: "\u8fd0\u884c\u4e2d",
+    PAUSED: "\u5df2\u6682\u505c",
+    QUEUED: "\u5df2\u6392\u961f",
+    COMPLETED: "\u5df2\u5b8c\u6210",
+    FAILED: "\u5931\u8d25",
+    CANCELLED: "\u5df2\u53d6\u6d88",
+  };
+  const modeLabelMap = {
+    simulation: "\u6a21\u62df",
+    hardware: "\u786c\u4ef6",
+    sitl: "SITL",
+    unknown: "\u672a\u77e5",
+  };
+
   const shortId = (value) => value.slice(0, 8).toUpperCase();
+  const translateStatus = (status) => statusLabelMap[status] || status || "\u672a\u77e5";
+  const translateMode = (mode) => modeLabelMap[String(mode || "unknown").toLowerCase()] || String(mode || "\u672a\u77e5").toUpperCase();
 
   const formatTime = (isoString) => {
     if (!isoString) {
-      return "UNKNOWN";
+      return "\u672a\u77e5";
     }
-    return new Date(isoString).toLocaleTimeString();
+
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) {
+      return "\u672a\u77e5";
+    }
+
+    return date.toLocaleTimeString("zh-CN", { hour12: false });
   };
 
   const formatDateTime = (isoString) => {
     if (!isoString) {
-      return "UNKNOWN";
+      return "\u672a\u77e5";
     }
-    return new Date(isoString).toLocaleString();
+
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) {
+      return "\u672a\u77e5";
+    }
+
+    return date.toLocaleString("zh-CN", { hour12: false });
   };
 
   const isActiveStatus = (status) => ["RUNNING", "PAUSED", "QUEUED", "EXECUTING"].includes(status || "");
@@ -52,13 +84,18 @@ export function useReplayHistory({
     Array.isArray(trace) && trace.length > 0 ? trace : fallbackWaypoints
   );
 
-  const replayPlaybackLabel = computed(() => (isReplayPlaying.value ? "PLAYING" : "PAUSED"));
+  const replayPlaybackLabel = computed(() => (isReplayPlaying.value ? "\u64ad\u653e\u4e2d" : "\u5df2\u6682\u505c"));
   const replayDurationLabel = computed(() => {
     if (replayTrace.value.length < 2) {
       return "0s";
     }
+
     const start = new Date(replayTrace.value[0].timestamp).getTime();
     const end = new Date(replayTrace.value[replayTrace.value.length - 1].timestamp).getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+      return "0s";
+    }
+
     const seconds = Math.max(0, Math.round((end - start) / 1000));
     return `${seconds}s`;
   });
@@ -66,9 +103,10 @@ export function useReplayHistory({
     if (!selectedReplayMissionId.value) {
       return "";
     }
+
     return selectedReplayExecutionId.value
-      ? `Replay: ${shortId(selectedReplayMissionId.value)} / ${shortId(selectedReplayExecutionId.value)}`
-      : `Replay: ${shortId(selectedReplayMissionId.value)}`;
+      ? `\u56de\u653e\uff1a${shortId(selectedReplayMissionId.value)} / ${shortId(selectedReplayExecutionId.value)}`
+      : `\u56de\u653e\uff1a${shortId(selectedReplayMissionId.value)}`;
   });
 
   const replayExecutions = computed(() => [...selectedReplayMission.value.executions]
@@ -93,23 +131,23 @@ export function useReplayHistory({
     .slice(0, 6));
 
   const executionSummaryLabel = (execution) => {
-    const endLabel = execution.ended_at ? `End ${formatTime(execution.ended_at)}` : "Active";
+    const endLabel = execution.ended_at ? `\u7ed3\u675f ${formatTime(execution.ended_at)}` : "\u8fdb\u884c\u4e2d";
     const tracePoints = Array.isArray(execution.trace) ? execution.trace.length : 0;
-    return `${endLabel} · ${tracePoints} pts`;
+    return `${endLabel} \u8def ${tracePoints} \u70b9`;
   };
 
   const missionHistoryStatus = (mission) => {
     const latestExecution = mission.latest_execution || null;
     if (!latestExecution) {
-      return mission.status || "UNKNOWN";
+      return translateStatus(mission.status);
     }
-    return `${mission.status} · ${latestExecution.status} · ${String(latestExecution.mode || "unknown").toUpperCase()}`;
+    return `${translateStatus(mission.status)} \u8def ${translateStatus(latestExecution.status)} \u8def ${translateMode(latestExecution.mode)}`;
   };
 
   const missionHistoryTime = (mission) => {
     const latestExecution = mission.latest_execution || null;
     return latestExecution?.started_at
-      ? `Last run ${formatDateTime(latestExecution.started_at)}`
+      ? `\u6700\u540e\u8fd0\u884c ${formatDateTime(latestExecution.started_at)}`
       : formatDateTime(mission.timestamp);
   };
 
@@ -117,7 +155,7 @@ export function useReplayHistory({
     id: execution.execution_id,
     title: shortId(execution.execution_id),
     summary: executionSummaryLabel(execution),
-    detail: `${execution.status} · ${String(execution.mode || "unknown").toUpperCase()} · ${formatTime(execution.started_at)}`,
+    detail: `${translateStatus(execution.status)} \u8def ${translateMode(execution.mode)} \u8def ${formatTime(execution.started_at)}`,
   })));
 
   const historyCards = computed(() => historyPreview.value.map((mission) => ({
@@ -191,7 +229,7 @@ export function useReplayHistory({
     }
     selectedReplayExecutionId.value = execution.execution_id;
     replayTrace.value = normalizeReplayTrace(execution.trace, replayWaypoints.value);
-    setStatusMessage(`Replay execution ${shortId(execution.execution_id)} loaded`);
+    setStatusMessage(`\u5df2\u52a0\u8f7d\u56de\u653e\u6267\u884c ${shortId(execution.execution_id)}`);
   };
 
   const applyMissionSnapshot = (mission) => {
@@ -226,7 +264,7 @@ export function useReplayHistory({
     try {
       const mission = await fetchMissionDetail(apiBaseUrl, missionId);
       applyMissionSnapshot(mission);
-      setStatusMessage(`Replay loaded for ${mission.name}`);
+      setStatusMessage(`\u5df2\u52a0\u8f7d\u4efb\u52a1\u56de\u653e\uff1a${mission.name}`);
       return mission;
     } catch (error) {
       setControlError(error.message);
@@ -245,7 +283,7 @@ export function useReplayHistory({
     selectedReplayMissionId.value = "";
     selectedReplayExecutionId.value = "";
     selectedReplayMission.value = { id: "", executions: [] };
-    setStatusMessage("Replay cleared");
+    setStatusMessage("\u5df2\u6e05\u7a7a\u56de\u653e");
   };
 
   const primeReplayFromUpload = ({ missionId, executionId, waypoints }) => {

@@ -19,10 +19,10 @@ try {
 Write-Host "2. Starting BACKEND (FastAPI)..." -ForegroundColor Yellow
 # Start Backend in a new window using proper python path
 # We assume the user is in the root and has venv
-$backendCmd = "d:\Documents\Codes\2025_DroneControlCore\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+$backendCmd = "d:\Documents\Codes\2025_DroneControlCore\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8090 --reload"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$backendCmd}"
 
-Write-Host "   - Backend launching on 127.0.0.1:8000" -ForegroundColor Green
+Write-Host "   - Backend launching on 127.0.0.1:8090" -ForegroundColor Green
 Write-Host "   - Waiting 5 seconds for backend to initialize..." -ForegroundColor Yellow
 Start-Sleep -Seconds 5
 

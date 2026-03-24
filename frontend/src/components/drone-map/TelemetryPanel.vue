@@ -1,9 +1,9 @@
 <template>
   <div>
     <div class="status-box panel-card">
-      <span class="label">Telemetry</span>
+      <span class="label">{{ labels.telemetry }}</span>
       <span class="value" :class="{ connected: isConnected, disconnected: !isConnected }">
-        {{ isConnected ? "ONLINE" : "OFFLINE" }}
+        {{ isConnected ? labels.online : labels.offline }}
       </span>
     </div>
 
@@ -17,13 +17,13 @@
 
       <div class="hud-panel">
         <div class="hud-item">
-          <span class="label">Pitch</span>
+          <span class="label">{{ labels.pitch }}</span>
           <span class="value" :class="{ warning: Math.abs(droneState.pitch) > 10 }">
             {{ droneState.pitch.toFixed(1) }} deg
           </span>
         </div>
         <div class="hud-item">
-          <span class="label">Roll</span>
+          <span class="label">{{ labels.roll }}</span>
           <span class="value">{{ droneState.roll.toFixed(1) }} deg</span>
         </div>
       </div>
@@ -51,15 +51,50 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  locale: {
+    type: String,
+    default: "zh",
+  },
 });
 
+const I18N = {
+  zh: {
+    telemetry: "\u9065\u6d4b",
+    online: "\u5728\u7ebf",
+    offline: "\u79bb\u7ebf",
+    pitch: "\u4fef\u4ef0",
+    roll: "\u6a2a\u6eda",
+    lat: "\u7eac\u5ea6",
+    lon: "\u7ecf\u5ea6",
+    altitude: "\u9ad8\u5ea6",
+    heading: "\u822a\u5411",
+    zoom: "\u7f29\u653e",
+    route: "\u8def\u7ebf",
+  },
+  en: {
+    telemetry: "Telemetry",
+    online: "ONLINE",
+    offline: "OFFLINE",
+    pitch: "Pitch",
+    roll: "Roll",
+    lat: "Lat",
+    lon: "Lon",
+    altitude: "Altitude",
+    heading: "Heading",
+    zoom: "Zoom",
+    route: "Route",
+  },
+};
+
+const labels = computed(() => I18N[props.locale] || I18N.zh);
+
 const telemetryItems = computed(() => [
-  { label: "Lat", value: props.droneState.lat.toFixed(5) },
-  { label: "Lon", value: props.droneState.lon.toFixed(5) },
-  { label: "Altitude", value: `${props.droneState.alt.toFixed(1)} m` },
-  { label: "Heading", value: `${props.droneState.heading.toFixed(0)} deg` },
-  { label: "Zoom", value: props.currentZoom.toFixed(1) },
-  { label: "Route", value: props.routeTypeLabel },
+  { label: labels.value.lat, value: props.droneState.lat.toFixed(5) },
+  { label: labels.value.lon, value: props.droneState.lon.toFixed(5) },
+  { label: labels.value.altitude, value: `${props.droneState.alt.toFixed(1)} m` },
+  { label: labels.value.heading, value: `${props.droneState.heading.toFixed(0)} deg` },
+  { label: labels.value.zoom, value: props.currentZoom.toFixed(1) },
+  { label: labels.value.route, value: props.routeTypeLabel },
 ]);
 </script>
 

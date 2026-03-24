@@ -1,13 +1,19 @@
 <template>
   <div class="page-shell">
     <div class="control-panel">
-      <h3>L3 Autonomous Nav</h3>
+      <div class="panel-header">
+        <h3>{{ ui.title }}</h3>
+        <button class="locale-toggle" type="button" @click="toggleLocale">
+          {{ ui.localeButton }}
+        </button>
+      </div>
 
       <TelemetryPanel
         :drone-state="droneState"
         :is-connected="isConnected"
         :current-zoom="currentZoom"
         :route-type-label="routeTypeLabel"
+        :locale="locale"
       />
 
       <MissionControlPanel
@@ -27,6 +33,7 @@
         :planning-error="planningError"
         :waypoint-count="waypoints.length"
         :is-uploading="isUploading"
+        :locale="locale"
         @refresh-history="refreshHistory"
         @pause="pauseExecution"
         @resume="resumeExecution"
@@ -52,6 +59,7 @@
         :is-replay-playing="isReplayPlaying"
         :history-cards="historyCards"
         :selected-replay-mission-id="selectedReplayMissionId"
+        :locale="locale"
         @update:mission-history-filter="missionHistoryFilter = $event"
         @clear-replay="clearReplay"
         @update:replay-execution-filter="replayExecutionFilter = $event"
@@ -124,8 +132,8 @@
         :fill-opacity="1"
       >
         <l-popup>
-          <strong>Replay Cursor</strong><br>
-          Step: {{ replayProgress }}
+          <strong>{{ ui.replayCursor }}</strong><br>
+          {{ ui.step }}: {{ replayProgress }}
         </l-popup>
       </l-circle-marker>
 
@@ -137,9 +145,9 @@
         :fill-opacity="1"
       >
         <l-popup>
-          <strong>Drone Live</strong><br>
-          Alt: {{ droneState.alt }}m<br>
-          Hdg: {{ droneState.heading }} deg
+          <strong>{{ ui.droneLive }}</strong><br>
+          {{ ui.altitude }}: {{ droneState.alt }}m<br>
+          {{ ui.heading }}: {{ droneState.heading }} deg
         </l-popup>
       </l-circle-marker>
     </l-map>
@@ -161,8 +169,9 @@ import { useReplayHistory } from "../composables/useReplayHistory";
 import { useRoutePlanning } from "../composables/useRoutePlanning";
 import { useTelemetry } from "../composables/useTelemetry";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8090";
 const { droneState, isConnected } = useTelemetry();
+const locale = ref("zh");
 
 const zoom = ref(14);
 const currentZoom = ref(14);
@@ -255,6 +264,37 @@ const replayPlaybackRoute = computed(() =>
 const replayCursor = computed(() => replayTrace.value[replayProgress.value] || null);
 const currentMissionIdLabel = computed(() => currentMissionId.value ? shortId(currentMissionId.value) : "NONE");
 const currentExecutionIdLabel = computed(() => currentExecutionId.value ? shortId(currentExecutionId.value) : "NONE");
+const ui = computed(() => {
+  if (locale.value === "en") {
+    return {
+      title: "L3 Autonomous Nav",
+      localeButton: "\u4e2d\u6587",
+      replayCursor: "Replay Cursor",
+      step: "Step",
+      droneLive: "Drone Live",
+      altitude: "Alt",
+      heading: "Hdg",
+      routeStart: "Route Start",
+      target: "Target",
+      replayStart: "Replay Start",
+      replayEnd: "Replay End",
+    };
+  }
+
+  return {
+    title: "L3 \u81ea\u4e3b\u5bfc\u822a",
+    localeButton: "English",
+    replayCursor: "\u56de\u653e\u5149\u6807",
+    step: "\u6b65\u9aa4",
+    droneLive: "\u65e0\u4eba\u673a\u5b9e\u65f6",
+    altitude: "\u9ad8\u5ea6",
+    heading: "\u822a\u5411",
+    routeStart: "\u8def\u7ebf\u8d77\u70b9",
+    target: "\u76ee\u6807",
+    replayStart: "\u56de\u653e\u8d77\u70b9",
+    replayEnd: "\u56de\u653e\u7ec8\u70b9",
+  };
+});
 
 const displayMarkers = computed(() => {
   const markers = [];
@@ -263,7 +303,7 @@ const displayMarkers = computed(() => {
     markers.push({
       latitude: waypoints.value[0].latitude,
       longitude: waypoints.value[0].longitude,
-      label: "Route Start",
+      label: ui.value.routeStart,
     });
   }
 
@@ -271,7 +311,7 @@ const displayMarkers = computed(() => {
     markers.push({
       latitude: targetPoint.value.latitude,
       longitude: targetPoint.value.longitude,
-      label: "Target",
+      label: ui.value.target,
     });
   }
 
@@ -279,12 +319,12 @@ const displayMarkers = computed(() => {
     markers.push({
       latitude: replayTrace.value[0].latitude,
       longitude: replayTrace.value[0].longitude,
-      label: "Replay Start",
+      label: ui.value.replayStart,
     });
     markers.push({
       latitude: replayTrace.value[replayTrace.value.length - 1].latitude,
       longitude: replayTrace.value[replayTrace.value.length - 1].longitude,
-      label: "Replay End",
+      label: ui.value.replayEnd,
     });
   }
 
@@ -292,6 +332,9 @@ const displayMarkers = computed(() => {
 });
 
 const shortId = (value) => value.slice(0, 8).toUpperCase();
+const toggleLocale = () => {
+  locale.value = locale.value === "zh" ? "en" : "zh";
+};
 
 const updateReplayProgress = (value) => {
   setReplayProgress(value);
@@ -379,13 +422,38 @@ onBeforeUnmount(() => {
 }
 
 h3 {
-  margin: 0 0 14px 0;
+  margin: 0;
   font-size: 1.1rem;
   color: #7dd3fc;
   text-transform: uppercase;
   letter-spacing: 1.2px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   padding-bottom: 10px;
+  margin-bottom: 14px;
+  gap: 12px;
+}
+
+.locale-toggle {
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  background: rgba(14, 165, 233, 0.1);
+  color: #7dd3fc;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.locale-toggle:hover {
+  background: rgba(14, 165, 233, 0.18);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 960px) {
