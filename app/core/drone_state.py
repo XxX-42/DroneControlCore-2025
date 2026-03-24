@@ -4,7 +4,7 @@ from typing import List, Dict
 
 class DroneState:
     # --- Config Constants ---
-    SPEED = 0.00005             # Linear Flight Speed
+    SPEED = 0.0004              # Linear Flight Speed (8x original default)
     SPIRAL_SPEED_DEG = 2.0      # Angular velocity (deg/tick)
     
     # Distances (Approx. 1 deg lat = 111km)
@@ -165,17 +165,15 @@ class DroneState:
             # Check Arrival
             if dist <= threshold:
                 if is_final_target:
-                    # >>> CAPTURE EVENT: Smooth Injection into Spiral <<<
-                    print(f"[DEBUG] Captured by Target Gravity Well (100m). Entering Spiral.")
-                    self.state = "SPIRALING"
-                    self.spiral_center = (t_lat, t_lon)
-                    self.current_radius = dist # Start exactly where we entered
-                    
-                    # Calculate Entry Angle (atan2) so we don't jump
-                    # drone = center + r * sin(angle) -> dy = r * sin, dx = r * cos
-                    # angle = atan2(dy, dx) (Note: typical math is atan2(y, x))
-                    self.spiral_angle_rad = math.atan2(dy, dx)
-                    
+                    print("[DEBUG] Final target reached. Mission segment done.")
+                    self.lat = t_lat
+                    self.lon = t_lon
+                    self.waypoint_queue.pop(0)
+                    self.state = "NAVIGATING" if self.waypoint_queue else "IDLE"
+                    self.pitch = 0.0
+                    self.roll = 0.0
+                    self.record_trace_point()
+                    return
                 else:
                     # Street Node: Just pop and keep flying
                     self.waypoint_queue.pop(0)
