@@ -1,58 +1,128 @@
-import osmnx as ox
+import asyncio
+import math
+from typing import Dict, List
+
 import networkx as nx
-from typing import List, Dict
+import osmnx as ox
+
+from app.core.settings import settings
+
 
 class PathPlanner:
     """Calculates obstacle-avoiding paths using the OpenStreetMap street network."""
-    
+
     def __init__(self):
-        # Initial map area (Can be expanded as needed)
         self.G = None
-        self.center_lat = 30.598
-        self.center_lon = 103.991
+        self.center_lat = settings.osm_center_lat
+        self.center_lon = settings.osm_center_lon
+        self._load_lock = asyncio.Lock()
+        self._load_attempted = False
         print("PathPlanner initialized. Map data pending...")
 
     async def load_map_data(self):
-        """Downloads and caches the street network for a fixed area (Chengdu)."""
-        # Download 'walk' network within 5km radius to simulate safer, non-direct routes
-        print("Downloading OSM network for avoidance...")
-        self.G = ox.graph_from_point(
-            (self.center_lat, self.center_lon), 
-            dist=5000, 
-            network_type='walk', 
-            retain_all=False, 
-            simplify=True
-        )
-        print("OSM Network loaded successfully.")
+        """Downloads and caches the street network once per process."""
+        async with self._load_lock:
+            if self.G is not None or self._load_attempted:
+                return self.G is not None
+
+            self._load_attempted = True
+            print("Downloading OSM network for avoidance...")
+            try:
+                self.G = await asyncio.to_thread(
+                    ox.graph_from_point,
+                    (self.center_lat, self.center_lon),
+                    dist=settings.osm_radius_m,
+                    network_type="walk",
+                    retain_all=False,
+                    simplify=True,
+                )
+                print("OSM Network loaded successfully.")
+                return True
+            except Exception as exc:
+                print(f"OSM network unavailable, falling back to direct route: {exc}")
+                self.G = None
+                return False
 
     def calculate_path(self, start_lat, start_lon, end_lat, end_lon) -> List[Dict]:
-        """Calculates the shortest path avoiding non-street areas (buildings)."""
         if self.G is None:
             raise RuntimeError("Map data not loaded. Call load_map_data first.")
-            
-        # 1. Find nearest network nodes to start and end points
+
         orig_node = ox.distance.nearest_nodes(self.G, start_lon, start_lat)
         dest_node = ox.distance.nearest_nodes(self.G, end_lon, end_lat)
 
-        # 2. Use NetworkX (A* by default) to find the shortest path
         try:
-            route_nodes = nx.shortest_path(self.G, orig_node, dest_node, weight='length')
+            route_nodes = nx.shortest_path(self.G, orig_node, dest_node, weight="length")
         except nx.NetworkXNoPath:
-            # If no path found (e.g., trying to fly to a disconnected island)
             print("ERROR: No safe path found between start and end nodes.")
             return []
 
-        # 3. Convert node IDs back to (lat, lon) coordinates
         coords = []
         for node in route_nodes:
-            # OSMnx stores lon in 'x' and lat in 'y'
-            coords.append({
-                "latitude": self.G.nodes[node]['y'],
-                "longitude": self.G.nodes[node]['x']
-            })
-            
+            coords.append(
+                {
+                    "latitude": self.G.nodes[node]["y"],
+                    "longitude": self.G.nodes[node]["x"],
+                }
+            )
+
         print(f"Path calculated: {len(coords)} nodes found.")
         return coords
 
-# Global Planner Instance
+    def build_direct_path(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+        segments: int = 12,
+    ) -> List[Dict]:
+        route = []
+        steps = max(2, segments)
+        for index in range(steps + 1):
+            ratio = index / steps
+            route.append(
+                {
+                    "latitude": start_lat + ((end_lat - start_lat) * ratio),
+                    "longitude": start_lon + ((end_lon - start_lon) * ratio),
+                }
+            )
+        return route
+
+    async def plan_path(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> Dict:
+        route = None
+        route_type = "direct"
+
+        if await self.load_map_data():
+            try:
+                route = self.calculate_path(start_lat, start_lon, end_lat, end_lon)
+                route_type = "osm"
+            except Exception as exc:
+                print(f"OSM route calculation failed, using direct route: {exc}")
+
+        if not route:
+            approx_distance_deg = math.hypot(end_lat - start_lat, end_lon - start_lon)
+            dynamic_segments = max(8, min(40, int(approx_distance_deg / 0.0003)))
+            route = self.build_direct_path(
+                start_lat,
+                start_lon,
+                end_lat,
+                end_lon,
+                segments=dynamic_segments,
+            )
+
+        route[0]["is_user_target"] = False
+        route[-1]["is_user_target"] = True
+        return {
+            "route_type": route_type,
+            "fallback_used": route_type != "osm",
+            "waypoints": route,
+        }
+
+
 path_planner = PathPlanner()

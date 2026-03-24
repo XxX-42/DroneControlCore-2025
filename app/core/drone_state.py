@@ -42,6 +42,8 @@ class DroneState:
         
         # User Controls
         self.sim_speed_factor = 1.0
+        self.is_paused = False
+        self._paused_state = "IDLE"
         
         # Internal Loop Control
         self._running = False
@@ -55,7 +57,28 @@ class DroneState:
     def set_mission(self, full_route: List[Dict]):
         self.waypoint_queue = full_route
         self.state = "NAVIGATING"
+        self.is_paused = False
+        self._paused_state = "NAVIGATING"
         print(f"[DEBUG] Mission Set. {len(full_route)} waypoints.")
+
+    def pause_mission(self):
+        if self.state != "IDLE" and not self.is_paused:
+            self._paused_state = self.state
+            self.is_paused = True
+            self.state = "PAUSED"
+
+    def resume_mission(self):
+        if self.is_paused:
+            self.is_paused = False
+            self.state = self._paused_state if self._paused_state != "IDLE" else "NAVIGATING"
+
+    def cancel_mission(self):
+        self.waypoint_queue = []
+        self.is_paused = False
+        self._paused_state = "IDLE"
+        self.state = "IDLE"
+        self.pitch = 0.0
+        self.roll = 0.0
 
     async def start_physics_loop(self):
         """
@@ -77,6 +100,11 @@ class DroneState:
     def update_position(self):
         # Apply speed factor
         current_speed = self.SPEED * self.sim_speed_factor
+
+        if self.is_paused or self.state == "PAUSED":
+            self.pitch = 0.0
+            self.roll = 0.0
+            return
         
         if this_is_idle := (not self.waypoint_queue and self.state != "SPIRALING"):
             self.state = "IDLE"

@@ -1,10 +1,13 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, Body, WebSocket, WebSocketDisconnect
 
 from app.core.drone_state import drone_state
+from app.core.settings import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/status")
@@ -26,9 +29,9 @@ async def set_spiral_speed(speed: float = Body(..., embed=True)):
 
 @router.websocket("/ws/telemetry")
 async def websocket_endpoint(websocket: WebSocket):
-    print(">>> [backend] WebSocket connection requested")
+    logger.info("WebSocket connection requested")
     await websocket.accept()
-    print(">>> [backend] WebSocket connected, streaming telemetry")
+    logger.info("WebSocket connected, streaming telemetry")
 
     try:
         while True:
@@ -45,11 +48,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     }
                 )
             except RuntimeError as exc:
-                print(f"WebSocket runtime error: {exc}")
+                logger.warning("WebSocket runtime error: %s", exc)
                 break
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(settings.telemetry_interval_ms / 1000)
     except WebSocketDisconnect:
-        print(">>> [backend] WebSocket disconnected")
+        logger.info("WebSocket disconnected")
     except Exception as exc:
-        print(f"!!! [backend] WebSocket error: {exc}")
+        logger.exception("WebSocket error: %s", exc)
