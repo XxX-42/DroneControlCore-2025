@@ -21,7 +21,7 @@ export default defineConfig({
     host: true
   },
   test: {
-    environment: 'node',
+    environment: 'jsdom',
     include: ['src/**/*.test.js']
   }
 })
