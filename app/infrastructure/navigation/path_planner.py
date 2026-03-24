@@ -14,19 +14,6 @@ class PathPlanner:
 
     DEFAULT_PADDING_M = 900
     MAX_GRAPH_CACHE_SIZE = 3
-    MAX_PREVIEW_GRAPH_CACHE_SIZE = 5
-    PREVIEW_EXCLUDED_HIGHWAYS = {
-        "corridor",
-        "cycleway",
-        "elevator",
-        "footway",
-        "path",
-        "pedestrian",
-        "platform",
-        "service",
-        "steps",
-        "track",
-    }
 
     def __init__(self):
         self.G = None
@@ -40,7 +27,6 @@ class PathPlanner:
         )
         self.graph_bbox = None
         self.graph_cache = OrderedDict()
-        self.preview_graph_cache = OrderedDict()
         self._load_lock = asyncio.Lock()
         print("PathPlanner initialized. Map data pending...")
 
@@ -175,14 +161,6 @@ class PathPlanner:
     def bbox_cache_key(self, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
         return tuple(round(value, 3) for value in bbox)
 
-    def preview_tile_key(
-        self,
-        bbox: tuple[float, float, float, float],
-        zoom_bucket: int,
-    ) -> str:
-        left, bottom, right, top = self.bbox_cache_key(bbox)
-        return f"{zoom_bucket}:{left}:{bottom}:{right}:{top}"
-
     async def load_graph_for_bbox(self, bbox: tuple[float, float, float, float]) -> bool:
         async with self._load_lock:
             cache_key = self.bbox_cache_key(bbox)
@@ -211,125 +189,6 @@ class PathPlanner:
             while len(self.graph_cache) > self.MAX_GRAPH_CACHE_SIZE:
                 self.graph_cache.popitem(last=False)
             return True
-
-    async def load_preview_graph_for_bbox(self, bbox: tuple[float, float, float, float]):
-        async with self._load_lock:
-            cache_key = self.bbox_cache_key(bbox)
-            cached_graph = self.preview_graph_cache.get(cache_key)
-            if cached_graph is not None:
-                self.preview_graph_cache.move_to_end(cache_key)
-                return cached_graph
-
-            try:
-                graph = await asyncio.to_thread(
-                    ox.graph_from_bbox,
-                    bbox=bbox,
-                    network_type="walk",
-                    retain_all=False,
-                    simplify=True,
-                )
-            except Exception as exc:
-                print(f"OSM preview graph unavailable for bbox {bbox}: {exc}")
-                return None
-
-            self.preview_graph_cache[cache_key] = graph
-            while len(self.preview_graph_cache) > self.MAX_PREVIEW_GRAPH_CACHE_SIZE:
-                self.preview_graph_cache.popitem(last=False)
-            return graph
-
-    def should_keep_preview_edge(self, data: Dict) -> bool:
-        highway = data.get("highway")
-        if highway is None:
-            return True
-
-        highway_values = highway if isinstance(highway, list) else [highway]
-        return any(value not in self.PREVIEW_EXCLUDED_HIGHWAYS for value in highway_values)
-
-    def simplify_graph_for_preview(self, graph):
-        preview_graph = graph.copy()
-        removable_edges = []
-
-        for u, v, key, data in preview_graph.edges(keys=True, data=True):
-            if not self.should_keep_preview_edge(data):
-                removable_edges.append((u, v, key))
-
-        if removable_edges:
-            preview_graph.remove_edges_from(removable_edges)
-
-        isolated_nodes = [node for node, degree in preview_graph.degree() if degree == 0]
-        if isolated_nodes:
-            preview_graph.remove_nodes_from(isolated_nodes)
-
-        if preview_graph.number_of_edges() == 0:
-            return graph
-
-        undirected_graph = preview_graph.to_undirected()
-        if undirected_graph.number_of_nodes() == 0:
-            return graph
-
-        largest_component = max(nx.connected_components(undirected_graph), key=len)
-        return preview_graph.subgraph(largest_component).copy()
-
-    def build_preview_graph_payload(
-        self,
-        graph,
-        bbox: tuple[float, float, float, float],
-        zoom_bucket: int,
-    ) -> Dict:
-        preview_graph = self.simplify_graph_for_preview(graph)
-        nodes = []
-        edges = []
-        seen_edges = set()
-
-        for node_id, data in preview_graph.nodes(data=True):
-            nodes.append(
-                {
-                    "id": str(node_id),
-                    "lat": data["y"],
-                    "lon": data["x"],
-                }
-            )
-
-        for u, v, data in preview_graph.edges(data=True):
-            edge_key = (str(u), str(v))
-            if edge_key in seen_edges or u == v:
-                continue
-            seen_edges.add(edge_key)
-            edges.append(
-                {
-                    "from": str(u),
-                    "to": str(v),
-                    "cost": float(data.get("length", 1.0)),
-                }
-            )
-
-        return {
-            "tile_key": self.preview_tile_key(bbox, zoom_bucket),
-            "zoom_bucket": zoom_bucket,
-            "bbox": {
-                "left": bbox[0],
-                "bottom": bbox[1],
-                "right": bbox[2],
-                "top": bbox[3],
-            },
-            "nodes": nodes,
-            "edges": edges,
-        }
-
-    async def get_preview_graph_tile(
-        self,
-        left: float,
-        bottom: float,
-        right: float,
-        top: float,
-        zoom_bucket: int,
-    ) -> Dict:
-        bbox = (left, bottom, right, top)
-        graph = await self.load_preview_graph_for_bbox(bbox)
-        if graph is None:
-            return self.build_preview_graph_payload(nx.MultiDiGraph(), bbox, zoom_bucket)
-
-        return self.build_preview_graph_payload(graph, bbox, zoom_bucket)
 
     async def ensure_graph_for_route(
         self,

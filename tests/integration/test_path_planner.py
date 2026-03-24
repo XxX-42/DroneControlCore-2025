@@ -1,5 +1,4 @@
 import pytest
-import networkx as nx
 
 from app.infrastructure.navigation.path_planner import PathPlanner
 
@@ -101,24 +100,3 @@ async def test_ensure_graph_reuses_loaded_bbox_without_reload(monkeypatch):
 
     assert loaded is True
     assert load_calls == []
-
-
-@pytest.mark.asyncio
-async def test_get_preview_graph_tile_exports_nodes_and_edges(monkeypatch):
-    planner = PathPlanner()
-    graph = nx.MultiDiGraph()
-    graph.add_node(1, x=103.991, y=30.598)
-    graph.add_node(2, x=103.995, y=30.6)
-    graph.add_edge(1, 2, length=120.0, highway="residential")
-
-    async def fake_load_preview_graph_for_bbox(_bbox):
-        return graph
-
-    monkeypatch.setattr(planner, "load_preview_graph_for_bbox", fake_load_preview_graph_for_bbox)
-
-    tile = await planner.get_preview_graph_tile(103.98, 30.59, 104.01, 30.61, 14)
-
-    assert tile["zoom_bucket"] == 14
-    assert tile["bbox"]["left"] == 103.98
-    assert tile["nodes"][0]["id"] == "1"
-    assert tile["edges"][0]["to"] == "2"
