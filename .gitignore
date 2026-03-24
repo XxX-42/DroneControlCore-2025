@@ -16,3 +16,9 @@ cache/
 # Local artifacts
 *.pt
 drone.db
+*.db-shm
+*.db-wal
+
+# Python coverage / tooling
+.coverage
+htmlcov/
