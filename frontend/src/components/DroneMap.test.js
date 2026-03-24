@@ -359,6 +359,55 @@ describe("DroneMap", () => {
     expect(missionControlState.uploadMission).toHaveBeenCalledTimes(2);
   });
 
+  it("inserts a realtime target ahead of queued task targets while preserving their order", async () => {
+    const { default: DroneMap } = await import("./DroneMap.vue");
+    const wrapper = mount(DroneMap);
+
+    await flushPromises();
+    await wrapper.find(".map-click-trigger-first").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await wrapper.find(".map-click-trigger-second").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    routePlanningState.resetRoutePlanning.mockClear();
+    routePlanningState.planRouteToTarget.mockClear();
+    missionControlState.uploadMission.mockClear();
+
+    await getModeButtons(wrapper)[1].trigger("click");
+    await wrapper.find(".map-click-trigger-third").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    expect(routePlanningState.resetRoutePlanning).toHaveBeenCalledTimes(2);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledTimes(3);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      1,
+      30.6123,
+      104.0821,
+      expect.objectContaining({
+        append: false,
+        startPoint: expect.objectContaining({ latitude: 30.598, longitude: 103.991 }),
+      }),
+    );
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      2,
+      31.2304,
+      121.4737,
+      expect.objectContaining({ append: true }),
+    );
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      3,
+      30.5728,
+      104.0668,
+      expect.objectContaining({ append: true }),
+    );
+    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(1);
+    expect(getTaskMarkerButtons(wrapper)).toHaveLength(3);
+  });
+
   it("uses the current drone position as the start point after refresh", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);

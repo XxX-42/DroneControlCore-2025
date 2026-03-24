@@ -499,6 +499,12 @@ const displayMarkers = computed(() => {
 });
 
 const shortId = (value) => value.slice(0, 8).toUpperCase();
+const createQueuedTarget = (latitude, longitude, sourceMode = "task") => ({
+  latitude,
+  longitude,
+  sourceMode,
+});
+
 const toStoredPoint = (point) => {
   if (!point) {
     return null;
@@ -665,6 +671,22 @@ const rebuildTaskRoute = async (targets, startPoint) => {
   return true;
 };
 
+const buildRealtimeInsertionQueue = (latitude, longitude) => {
+  const insertedTarget = createQueuedTarget(latitude, longitude, "realtime");
+  const existingTargets = [...taskTargets.value];
+  let insertIndex = 0;
+
+  while (insertIndex < existingTargets.length && existingTargets[insertIndex].sourceMode === "realtime") {
+    insertIndex += 1;
+  }
+
+  return [
+    ...existingTargets.slice(0, insertIndex),
+    insertedTarget,
+    ...existingTargets.slice(insertIndex),
+  ];
+};
+
 const handleTaskModeClick = async (lat, lng) => {
   const append = taskTargets.value.length > 0;
   const result = await planRouteToTarget(lat, lng, {
@@ -673,7 +695,7 @@ const handleTaskModeClick = async (lat, lng) => {
   });
 
   if (result) {
-    taskTargets.value = [...taskTargets.value, { latitude: lat, longitude: lng }];
+    taskTargets.value = [...taskTargets.value, createQueuedTarget(lat, lng, "task")];
     statusMessage.value = pendingTaskExecution.value
       ? "\u4efb\u52a1\u6a21\u5f0f\uff1a\u5df2\u6392\u961f\u4efb\u52a1\u70b9\uff0c\u7b49\u5f85\u5b9e\u65f6\u4efb\u52a1\u5b8c\u6210\u540e\u6309\u987a\u5e8f\u6267\u884c"
       : append
@@ -742,16 +764,11 @@ const resetRealtimeVisualState = () => {
 
 const handleRealtimeModeClick = async (lat, lng) => {
   resetRealtimeVisualState();
+  const nextQueue = buildRealtimeInsertionQueue(lat, lng);
+  taskTargets.value = nextQueue;
 
-  const result = await planRouteToTarget(lat, lng, {
-    startPoint: {
-      latitude: droneState.value.lat,
-      longitude: droneState.value.lon,
-    },
-    append: false,
-  });
-
-  if (!result) {
+  const rebuilt = await rebuildTaskRoute(nextQueue, getCurrentDronePoint());
+  if (!rebuilt) {
     return;
   }
 
@@ -759,9 +776,9 @@ const handleRealtimeModeClick = async (lat, lng) => {
     await cancelExecution();
   }
 
-  const uploadResult = await uploadPlannedMission(result.waypoints);
+  const uploadResult = await uploadPlannedMission(waypoints.value);
   if (uploadResult) {
-    statusMessage.value = "\u5b9e\u65f6\u6a21\u5f0f\uff1a\u5df2\u7acb\u5373\u4e0b\u53d1\u65b0\u76ee\u6807";
+    statusMessage.value = "\u5b9e\u65f6\u6a21\u5f0f\uff1a\u5df2\u63d2\u5165\u65b0\u76ee\u6807\uff0c\u5e76\u4fdd\u7559\u539f\u4efb\u52a1\u987a\u5e8f";
   }
 };
 
@@ -1193,5 +1210,4 @@ h3 {
   }
 }
 </style>
-
 
