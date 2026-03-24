@@ -673,17 +673,9 @@ const rebuildTaskRoute = async (targets, startPoint) => {
 
 const buildRealtimeInsertionQueue = (latitude, longitude) => {
   const insertedTarget = createQueuedTarget(latitude, longitude, "realtime");
-  const existingTargets = [...taskTargets.value];
-  let insertIndex = 0;
-
-  while (insertIndex < existingTargets.length && existingTargets[insertIndex].sourceMode === "realtime") {
-    insertIndex += 1;
-  }
-
   return [
-    ...existingTargets.slice(0, insertIndex),
     insertedTarget,
-    ...existingTargets.slice(insertIndex),
+    ...taskTargets.value,
   ];
 };
 
@@ -816,10 +808,6 @@ const clearHoverPreview = () => {
 
 const onMapHover = (event) => {
   const { lat, lng } = event.latlng;
-
-  if (navigationMode.value === "task" && pendingTaskExecution.value && taskTargets.value.length > 0) {
-    return;
-  }
 
   if (lastHoverPoint.value) {
     const latDelta = Math.abs(lastHoverPoint.value.latitude - lat);
@@ -1210,4 +1198,3 @@ h3 {
   }
 }
 </style>
-

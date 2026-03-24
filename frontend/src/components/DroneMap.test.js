@@ -408,6 +408,92 @@ describe("DroneMap", () => {
     expect(getTaskMarkerButtons(wrapper)).toHaveLength(3);
   });
 
+  it("keeps the newest realtime target as task point 1 before reaching the original first task point", async () => {
+    const { default: DroneMap } = await import("./DroneMap.vue");
+    const wrapper = mount(DroneMap);
+
+    await flushPromises();
+    await wrapper.find(".map-click-trigger-first").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await wrapper.find(".map-click-trigger-second").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await getModeButtons(wrapper)[1].trigger("click");
+    await wrapper.find(".map-click-trigger-third").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    routePlanningState.resetRoutePlanning.mockClear();
+    routePlanningState.planRouteToTarget.mockClear();
+    missionControlState.uploadMission.mockClear();
+
+    await wrapper.find(".map-click-trigger-fourth").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledTimes(4);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      1,
+      30.6215,
+      104.0956,
+      expect.objectContaining({ append: false }),
+    );
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      2,
+      30.6123,
+      104.0821,
+      expect.objectContaining({ append: true }),
+    );
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      3,
+      31.2304,
+      121.4737,
+      expect.objectContaining({ append: true }),
+    );
+    expect(routePlanningState.planRouteToTarget).toHaveBeenNthCalledWith(
+      4,
+      30.5728,
+      104.0668,
+      expect.objectContaining({ append: true }),
+    );
+    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(1);
+    expect(getTaskMarkerButtons(wrapper)).toHaveLength(4);
+  });
+
+  it("uses the last queued task point as the OSM hover start in task mode", async () => {
+    const { default: DroneMap } = await import("./DroneMap.vue");
+    const wrapper = mount(DroneMap);
+
+    await flushPromises();
+    await wrapper.find(".map-click-trigger-first").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await wrapper.find(".map-click-trigger-second").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    planNavigationMock.mockClear();
+
+    await wrapper.find(".map-hover-trigger").trigger("click");
+    await vi.advanceTimersByTimeAsync(140);
+    await flushPromises();
+
+    expect(planNavigationMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        start_latitude: 30.5728,
+        start_longitude: 104.0668,
+        target_latitude: 30.6012,
+        target_longitude: 104.0021,
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("uses the current drone position as the start point after refresh", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);
