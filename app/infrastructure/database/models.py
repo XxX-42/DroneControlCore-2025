@@ -27,3 +27,4 @@ class MissionExecutionModel(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
+    trace_json = Column(Text, nullable=True)

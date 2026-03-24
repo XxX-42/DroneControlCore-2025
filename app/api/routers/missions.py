@@ -39,6 +39,7 @@ def serialize_execution(execution: MissionExecutionModel) -> dict:
         "started_at": execution.started_at.isoformat() if execution.started_at else None,
         "ended_at": execution.ended_at.isoformat() if execution.ended_at else None,
         "error_message": execution.error_message,
+        "trace": json.loads(execution.trace_json or "[]"),
     }
 
 
@@ -179,6 +180,7 @@ async def upload_mission(
                 mode=result["mode"],
                 status=result["execution_status"],
                 started_at=datetime.now(),
+                trace_json="[]",
             )
         )
         execution_service.bind_simulation_execution(str(mission_id), str(execution_id))
@@ -207,6 +209,7 @@ async def upload_mission(
                 started_at=datetime.now(),
                 ended_at=datetime.now(),
                 error_message=str(exc),
+                trace_json="[]",
             )
         )
         await db.commit()

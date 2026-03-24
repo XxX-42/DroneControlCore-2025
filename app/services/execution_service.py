@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+import json
 
 from fastapi import HTTPException
 
@@ -49,13 +50,23 @@ class ExecutionService:
         self.active_simulation_mission_id = mission_id
         self.active_simulation_execution_id = execution_id
 
+    def sync_trace_to_execution(self, execution: MissionExecutionModel) -> bool:
+        if execution.mode != AppMode.SIMULATION.value:
+            return False
+        trace_json = json.dumps(drone_state.get_trace_snapshot())
+        if execution.trace_json == trace_json:
+            return False
+        execution.trace_json = trace_json
+        return True
+
     async def reconcile_simulation_state(self, mission: MissionModel, execution: MissionExecutionModel) -> bool:
         if execution.mode != AppMode.SIMULATION.value:
             return False
+        changed = self.sync_trace_to_execution(execution)
         if execution.status not in {ExecutionStatus.RUNNING.value, ExecutionStatus.PAUSED.value}:
-            return False
+            return changed
         if mission.mission_uuid != self.active_simulation_mission_id:
-            return False
+            return changed
         if drone_state.is_paused and execution.status != ExecutionStatus.PAUSED.value:
             execution.status = ExecutionStatus.PAUSED.value
             mission.status = MissionStatus.PAUSED.value
@@ -72,7 +83,7 @@ class ExecutionService:
                 self.active_simulation_execution_id = None
                 self.active_simulation_mission_id = None
             return True
-        return False
+        return changed
 
     async def pause_execution(self, mission: MissionModel, execution: MissionExecutionModel):
         if execution.mode != AppMode.SIMULATION.value:
@@ -86,6 +97,7 @@ class ExecutionService:
             MissionStatus.PAUSED,
         ).value
         drone_state.pause_mission()
+        self.sync_trace_to_execution(execution)
         return execution.status, mission.status
 
     async def resume_execution(self, mission: MissionModel, execution: MissionExecutionModel):
@@ -100,6 +112,7 @@ class ExecutionService:
             MissionStatus.EXECUTING,
         ).value
         drone_state.resume_mission()
+        self.sync_trace_to_execution(execution)
         return execution.status, mission.status
 
     async def cancel_execution(self, mission: MissionModel, execution: MissionExecutionModel):
@@ -114,6 +127,7 @@ class ExecutionService:
         execution.ended_at = datetime.now()
         if execution.mode == AppMode.SIMULATION.value:
             drone_state.cancel_mission()
+            self.sync_trace_to_execution(execution)
         if execution.execution_uuid == self.active_simulation_execution_id:
             self.active_simulation_execution_id = None
             self.active_simulation_mission_id = None

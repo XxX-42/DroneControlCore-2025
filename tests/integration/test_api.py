@@ -80,6 +80,7 @@ def test_mission_detail_and_execution_detail():
     execution_body = execution_response.json()
     assert execution_body["mission_id"] == upload_body["mission_id"]
     assert execution_body["execution_id"] == upload_body["execution_id"]
+    assert isinstance(execution_body["trace"], list)
 
 
 def test_execution_pause_resume_cancel_flow():

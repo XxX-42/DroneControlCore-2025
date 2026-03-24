@@ -1,4 +1,5 @@
 import math
+from datetime import datetime
 from typing import List, Dict
 
 class DroneState:
@@ -34,6 +35,7 @@ class DroneState:
         # Navigation Data
         self.waypoint_queue: List[Dict] = []
         self.state = "IDLE" # IDLE, NAVIGATING, SPIRALING
+        self.trace_points: List[Dict] = []
         
         # Spiral Mechanics
         self.spiral_center = (0, 0)
@@ -59,6 +61,8 @@ class DroneState:
         self.state = "NAVIGATING"
         self.is_paused = False
         self._paused_state = "NAVIGATING"
+        self.trace_points = []
+        self.record_trace_point()
         print(f"[DEBUG] Mission Set. {len(full_route)} waypoints.")
 
     def pause_mission(self):
@@ -79,6 +83,32 @@ class DroneState:
         self.state = "IDLE"
         self.pitch = 0.0
         self.roll = 0.0
+        self.record_trace_point()
+
+    def record_trace_point(self):
+        point = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "latitude": self.lat,
+            "longitude": self.lon,
+            "altitude": self.alt,
+            "heading": self.heading,
+            "state": self.state,
+        }
+        last_point = self.trace_points[-1] if self.trace_points else None
+        if last_point:
+            same_position = (
+                abs(last_point["latitude"] - point["latitude"]) < 1e-7
+                and abs(last_point["longitude"] - point["longitude"]) < 1e-7
+                and abs(last_point["altitude"] - point["altitude"]) < 1e-7
+            )
+            if same_position and last_point["state"] == point["state"]:
+                return
+        self.trace_points.append(point)
+        if len(self.trace_points) > 5000:
+            self.trace_points = self.trace_points[-5000:]
+
+    def get_trace_snapshot(self):
+        return list(self.trace_points)
 
     async def start_physics_loop(self):
         """
@@ -104,12 +134,14 @@ class DroneState:
         if self.is_paused or self.state == "PAUSED":
             self.pitch = 0.0
             self.roll = 0.0
+            self.record_trace_point()
             return
         
         if this_is_idle := (not self.waypoint_queue and self.state != "SPIRALING"):
             self.state = "IDLE"
             self.pitch = 0.0
             self.roll = 0.0
+            self.record_trace_point()
             return
 
         # --- STATE: NAVIGATING (Flying to target) ---
@@ -184,6 +216,7 @@ class DroneState:
                     self.state = "NAVIGATING" # Go to next target
                 else:
                     self.state = "IDLE" # All done
+                self.record_trace_point()
                 return
 
             # 3. Orbital Mechanics
@@ -218,6 +251,7 @@ class DroneState:
         # Basic Lat/Lon bounds
         self.lat = max(self.CLAMP_LAT_BOUNDS[0], min(self.CLAMP_LAT_BOUNDS[1], self.lat))
         self.lon = max(self.CLAMP_LON_BOUNDS[0], min(self.CLAMP_LON_BOUNDS[1], self.lon))
+        self.record_trace_point()
 
 # Singleton
 drone_state = DroneState()

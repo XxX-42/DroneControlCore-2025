@@ -132,17 +132,17 @@
           <span>Replay: {{ shortId(selectedReplayMissionId) }}</span>
           <button class="btn-ghost" @click="clearReplay">CLEAR REPLAY</button>
         </div>
-        <div v-if="replayWaypoints.length > 0" class="replay-controls">
+        <div v-if="replayTrace.length > 0" class="replay-controls">
           <div class="replay-meta">
             <span>{{ replayPlaybackLabel }}</span>
-            <span>{{ replayProgress }} / {{ replayWaypoints.length - 1 }}</span>
+            <span>{{ replayProgress }} / {{ replayTrace.length - 1 }}</span>
           </div>
           <input
             v-model="replayProgress"
             class="timeline"
             type="range"
             min="0"
-            :max="Math.max(replayWaypoints.length - 1, 0)"
+            :max="Math.max(replayTrace.length - 1, 0)"
             step="1"
           >
           <div class="btn-row replay-actions">
@@ -155,7 +155,7 @@
             <button
               class="btn-ghost"
               @click="stepReplayForward"
-              :disabled="replayProgress >= replayWaypoints.length - 1"
+              :disabled="replayProgress >= replayTrace.length - 1"
             >
               NEXT
             </button>
@@ -274,6 +274,7 @@ const zoom = ref(14);
 const currentZoom = ref(14);
 const waypoints = ref([]);
 const replayWaypoints = ref([]);
+const replayTrace = ref([]);
 const replayProgress = ref(0);
 const isReplayPlaying = ref(false);
 const selectedReplayMissionId = ref("");
@@ -297,11 +298,11 @@ const currentExecutionStatus = ref("NONE");
 let replayTimer = null;
 
 const plannedRoute = computed(() => waypoints.value.map((wp) => [wp.latitude, wp.longitude]));
-const replayRoute = computed(() => replayWaypoints.value.map((wp) => [wp.latitude, wp.longitude]));
+const replayRoute = computed(() => replayTrace.value.map((point) => [point.latitude, point.longitude]));
 const replayPlaybackRoute = computed(() =>
-  replayWaypoints.value.slice(0, replayProgress.value + 1).map((wp) => [wp.latitude, wp.longitude]),
+  replayTrace.value.slice(0, replayProgress.value + 1).map((point) => [point.latitude, point.longitude]),
 );
-const replayCursor = computed(() => replayWaypoints.value[replayProgress.value] || null);
+const replayCursor = computed(() => replayTrace.value[replayProgress.value] || null);
 const replayPlaybackLabel = computed(() => (isReplayPlaying.value ? "PLAYING" : "PAUSED"));
 const routeTypeLabel = computed(() => routeType.value.toUpperCase());
 const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
@@ -327,15 +328,15 @@ const displayMarkers = computed(() => {
     });
   }
 
-  if (replayWaypoints.value.length > 0) {
+  if (replayTrace.value.length > 0) {
     markers.push({
-      latitude: replayWaypoints.value[0].latitude,
-      longitude: replayWaypoints.value[0].longitude,
+      latitude: replayTrace.value[0].latitude,
+      longitude: replayTrace.value[0].longitude,
       label: "Replay Start",
     });
     markers.push({
-      latitude: replayWaypoints.value[replayWaypoints.value.length - 1].latitude,
-      longitude: replayWaypoints.value[replayWaypoints.value.length - 1].longitude,
+      latitude: replayTrace.value[replayTrace.value.length - 1].latitude,
+      longitude: replayTrace.value[replayTrace.value.length - 1].longitude,
       label: "Replay End",
     });
   }
@@ -361,18 +362,18 @@ const stopReplayPlayback = () => {
 };
 
 const startReplayPlayback = () => {
-  if (replayWaypoints.value.length < 2) {
+  if (replayTrace.value.length < 2) {
     return;
   }
 
-  if (replayProgress.value >= replayWaypoints.value.length - 1) {
+  if (replayProgress.value >= replayTrace.value.length - 1) {
     replayProgress.value = 0;
   }
 
   stopReplayPlayback();
   isReplayPlaying.value = true;
   replayTimer = setInterval(() => {
-    if (replayProgress.value >= replayWaypoints.value.length - 1) {
+    if (replayProgress.value >= replayTrace.value.length - 1) {
       stopReplayPlayback();
       return;
     }
@@ -390,7 +391,7 @@ const toggleReplayPlayback = () => {
 
 const stepReplayForward = () => {
   stopReplayPlayback();
-  if (replayProgress.value < replayWaypoints.value.length - 1) {
+  if (replayProgress.value < replayTrace.value.length - 1) {
     replayProgress.value += 1;
   }
 };
@@ -425,7 +426,7 @@ watch(() => [droneState.value.lat, droneState.value.lon], ([newLat, newLon]) => 
   }
 });
 
-watch(replayWaypoints, () => {
+watch(replayTrace, () => {
   replayProgress.value = 0;
   stopReplayPlayback();
 });
@@ -435,7 +436,6 @@ const applyMissionSnapshot = (mission) => {
   currentMissionStatus.value = mission.status || "UNKNOWN";
   if (Array.isArray(mission.waypoints) && mission.waypoints.length > 0) {
     waypoints.value = mission.waypoints;
-    replayWaypoints.value = mission.waypoints;
     selectedReplayMissionId.value = mission.id || "";
     targetPoint.value = mission.waypoints[mission.waypoints.length - 1];
   }
@@ -444,9 +444,13 @@ const applyMissionSnapshot = (mission) => {
     const latestExecution = mission.executions[mission.executions.length - 1];
     currentExecutionId.value = latestExecution.execution_id;
     currentExecutionStatus.value = latestExecution.status;
+    replayTrace.value = Array.isArray(latestExecution.trace) && latestExecution.trace.length > 0
+      ? latestExecution.trace
+      : mission.waypoints;
   } else {
     currentExecutionId.value = "";
     currentExecutionStatus.value = "NONE";
+    replayTrace.value = mission.waypoints;
   }
 };
 
@@ -481,7 +485,7 @@ const loadMissionDetail = async (missionId) => {
 };
 
 const clearReplay = () => {
-  replayWaypoints.value = [];
+  replayTrace.value = [];
   selectedReplayMissionId.value = "";
   statusMessage.value = "Replay cleared";
 };
@@ -528,6 +532,7 @@ const clearMission = () => {
   stopReplayPlayback();
   waypoints.value = [];
   replayWaypoints.value = [];
+  replayTrace.value = [];
   selectedReplayMissionId.value = "";
   targetPoint.value = null;
   routeType.value = "direct";
@@ -579,6 +584,7 @@ const uploadMission = async () => {
     currentMissionStatus.value = result.mission_status;
     currentExecutionStatus.value = result.execution_status;
     replayWaypoints.value = waypoints.value;
+    replayTrace.value = waypoints.value;
     selectedReplayMissionId.value = result.mission_id;
     statusMessage.value = result.message;
     await refreshHistory();
