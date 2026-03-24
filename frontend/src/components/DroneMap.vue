@@ -155,8 +155,10 @@ import { LCircleMarker, LMap, LMarker, LPopup, LPolyline, LTileLayer } from "@vu
 import MissionControlPanel from "./drone-map/MissionControlPanel.vue";
 import MissionHistoryPanel from "./drone-map/MissionHistoryPanel.vue";
 import TelemetryPanel from "./drone-map/TelemetryPanel.vue";
+import { useDronePath } from "../composables/useDronePath";
 import { useMissionControl } from "../composables/useMissionControl";
 import { useReplayHistory } from "../composables/useReplayHistory";
+import { useRoutePlanning } from "../composables/useRoutePlanning";
 import { useTelemetry } from "../composables/useTelemetry";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080";
@@ -164,12 +166,6 @@ const { droneState, isConnected } = useTelemetry();
 
 const zoom = ref(14);
 const currentZoom = ref(14);
-const waypoints = ref([]);
-const targetPoint = ref(null);
-const routeType = ref("direct");
-const dronePath = ref([]);
-const isPlanning = ref(false);
-const planningError = ref("");
 
 const {
   missionHistory,
@@ -230,13 +226,33 @@ const {
   },
 });
 
-const plannedRoute = computed(() => waypoints.value.map((wp) => [wp.latitude, wp.longitude]));
+const {
+  waypoints,
+  targetPoint,
+  isPlanning,
+  planningError,
+  plannedRoute,
+  routeTypeLabel,
+  planRouteToTarget,
+  resetRoutePlanning,
+} = useRoutePlanning({
+  apiBaseUrl,
+  droneState,
+  setStatusMessage: (message) => {
+    statusMessage.value = message;
+  },
+});
+
+const {
+  dronePath,
+  resetDronePath,
+} = useDronePath(droneState);
+
 const replayRoute = computed(() => replayTrace.value.map((point) => [point.latitude, point.longitude]));
 const replayPlaybackRoute = computed(() =>
   replayTrace.value.slice(0, replayProgress.value + 1).map((point) => [point.latitude, point.longitude]),
 );
 const replayCursor = computed(() => replayTrace.value[replayProgress.value] || null);
-const routeTypeLabel = computed(() => routeType.value.toUpperCase());
 const currentMissionIdLabel = computed(() => currentMissionId.value ? shortId(currentMissionId.value) : "NONE");
 const currentExecutionIdLabel = computed(() => currentExecutionId.value ? shortId(currentExecutionId.value) : "NONE");
 
@@ -289,67 +305,16 @@ const onMapReady = (map) => {
   });
 };
 
-watch(() => [droneState.value.lat, droneState.value.lon], ([newLat, newLon]) => {
-  if (dronePath.value.length === 0) {
-    dronePath.value.push([newLat, newLon]);
-  } else {
-    const last = dronePath.value[dronePath.value.length - 1];
-    if (Math.abs(newLat - last[0]) > 0.00001 || Math.abs(newLon - last[1]) > 0.00001) {
-      dronePath.value.push([newLat, newLon]);
-    }
-  }
-
-  if (dronePath.value.length > 500) {
-    dronePath.value.shift();
-  }
-});
-
 const onMapClick = async (event) => {
   const { lat, lng } = event.latlng;
-  targetPoint.value = { latitude: lat, longitude: lng };
-  planningError.value = "";
-  isPlanning.value = true;
-
-  try {
-    const response = await fetch(`${apiBaseUrl}/api/v1/navigation/plan`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        start_latitude: droneState.value.lat,
-        start_longitude: droneState.value.lon,
-        target_latitude: lat,
-        target_longitude: lng,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}));
-      throw new Error(errorPayload.detail || "Route planning failed");
-    }
-
-    const result = await response.json();
-    waypoints.value = result.waypoints;
-    routeType.value = result.route_type;
-    statusMessage.value = `Route planned via ${result.route_type.toUpperCase()}`;
-  } catch (error) {
-    waypoints.value = [];
-    routeType.value = "direct";
-    planningError.value = error.message;
-  } finally {
-    isPlanning.value = false;
-  }
+  await planRouteToTarget(lat, lng);
 };
 
 const clearMission = () => {
   stopReplayPlayback();
-  waypoints.value = [];
   resetReplayHistory();
-  targetPoint.value = null;
-  routeType.value = "direct";
-  planningError.value = "";
-  dronePath.value = [];
+  resetRoutePlanning();
+  resetDronePath();
   resetMissionControl();
 };
 
