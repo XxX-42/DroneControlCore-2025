@@ -157,7 +157,7 @@
 <script setup>
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { LCircleMarker, LMap, LMarker, LPopup, LPolyline, LTileLayer } from "@vue-leaflet/vue-leaflet";
 
 import MissionControlPanel from "./drone-map/MissionControlPanel.vue";
@@ -170,8 +170,10 @@ import { useRoutePlanning } from "../composables/useRoutePlanning";
 import { useTelemetry } from "../composables/useTelemetry";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8090";
+const PLAN_CLICK_DEBOUNCE_MS = 250;
 const { droneState, isConnected } = useTelemetry();
 const locale = ref("zh");
+const pendingPlanTimer = ref(null);
 
 const zoom = ref(14);
 const currentZoom = ref(14);
@@ -350,7 +352,14 @@ const onMapReady = (map) => {
 
 const onMapClick = async (event) => {
   const { lat, lng } = event.latlng;
-  await planRouteToTarget(lat, lng);
+  if (pendingPlanTimer.value) {
+    clearTimeout(pendingPlanTimer.value);
+  }
+
+  pendingPlanTimer.value = setTimeout(async () => {
+    pendingPlanTimer.value = null;
+    await planRouteToTarget(lat, lng);
+  }, PLAN_CLICK_DEBOUNCE_MS);
 };
 
 const clearMission = () => {
@@ -389,6 +398,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (pendingPlanTimer.value) {
+    clearTimeout(pendingPlanTimer.value);
+    pendingPlanTimer.value = null;
+  }
   stopReplayPlayback();
 });
 </script>

@@ -1,6 +1,6 @@
 import { computed, defineComponent, h, ref } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let telemetryState;
 let missionControlState;
@@ -30,9 +30,13 @@ vi.mock("@vue-leaflet/vue-leaflet", () => {
           onClick: () => emit("ready", leafletMapMock),
         }, "ready"),
         h("button", {
-          class: "map-click-trigger",
+          class: "map-click-trigger-first",
           onClick: () => emit("click", { latlng: { lat: 31.2304, lng: 121.4737 } }),
         }, "map-click"),
+        h("button", {
+          class: "map-click-trigger-second",
+          onClick: () => emit("click", { latlng: { lat: 30.5728, lng: 104.0668 } }),
+        }, "map-click-2"),
         slots.default?.(),
       ]);
     },
@@ -182,6 +186,7 @@ const findButtonByText = (wrapper, text) => wrapper.findAll("button").find((butt
 
 describe("DroneMap", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     scaleControlAddToMock = vi.fn();
     scaleControlFactoryMock = vi.fn(() => ({
       addTo: scaleControlAddToMock,
@@ -208,6 +213,10 @@ describe("DroneMap", () => {
     dronePathState = createDronePathState();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("wires planning, upload, and replay actions through the orchestration layer", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);
@@ -227,8 +236,13 @@ describe("DroneMap", () => {
     expect(scaleControlAddToMock).toHaveBeenCalledWith(leafletMapMock);
     expect(leafletMapMock.on).toHaveBeenCalledWith("zoom", expect.any(Function));
 
-    await wrapper.find(".map-click-trigger").trigger("click");
-    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledWith(31.2304, 121.4737);
+    await wrapper.find(".map-click-trigger-first").trigger("click");
+    await wrapper.find(".map-click-trigger-second").trigger("click");
+    expect(routePlanningState.planRouteToTarget).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledTimes(1);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledWith(30.5728, 104.0668);
 
     await findButtonByText(wrapper, "上传任务").trigger("click");
     expect(missionControlState.uploadMission).toHaveBeenCalledWith(routePlanningState.waypoints.value);

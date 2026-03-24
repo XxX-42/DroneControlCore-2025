@@ -10,6 +10,7 @@ from app.core.settings import AppMode, settings
 from app.api.routers import missions, navigation, telemetry, vision
 from app.infrastructure.database.db import init_db
 from app.infrastructure.mavsdk.connection import mavsdk_manager
+from app.infrastructure.navigation.path_planner import path_planner
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -35,6 +36,12 @@ async def lifespan(app: FastAPI):
         settings.osm_radius_m,
     )
     await init_db()
+    try:
+        osm_loaded = await path_planner.load_map_data()
+        logger.info("OSM graph preload completed success=%s", osm_loaded)
+    except Exception:
+        logger.exception("OSM graph preload failed during startup")
+
     if settings.app_mode != AppMode.SIMULATION:
         asyncio.create_task(mavsdk_manager.connect())
 
