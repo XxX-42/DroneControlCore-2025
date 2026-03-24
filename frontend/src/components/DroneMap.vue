@@ -3,228 +3,65 @@
     <div class="control-panel">
       <h3>L3 Autonomous Nav</h3>
 
-      <div class="status-box">
-        <span class="label">Telemetry</span>
-        <span class="value" :class="{ connected: isConnected, disconnected: !isConnected }">
-          {{ isConnected ? "ONLINE" : "OFFLINE" }}
-        </span>
-      </div>
+      <TelemetryPanel
+        :drone-state="droneState"
+        :is-connected="isConnected"
+        :current-zoom="currentZoom"
+        :route-type-label="routeTypeLabel"
+      />
 
-      <div class="telemetry-grid">
-        <div>
-          <span class="label">Lat</span>
-          <span class="value">{{ droneState.lat.toFixed(5) }}</span>
-        </div>
-        <div>
-          <span class="label">Lon</span>
-          <span class="value">{{ droneState.lon.toFixed(5) }}</span>
-        </div>
-        <div>
-          <span class="label">Altitude</span>
-          <span class="value">{{ droneState.alt.toFixed(1) }} m</span>
-        </div>
-        <div>
-          <span class="label">Heading</span>
-          <span class="value">{{ droneState.heading.toFixed(0) }} deg</span>
-        </div>
-        <div>
-          <span class="label">Zoom</span>
-          <span class="value">{{ currentZoom.toFixed(1) }}</span>
-        </div>
-        <div>
-          <span class="label">Route</span>
-          <span class="value">{{ routeTypeLabel }}</span>
-        </div>
-      </div>
+      <MissionControlPanel
+        :current-mission-id-label="currentMissionIdLabel"
+        :current-execution-id-label="currentExecutionIdLabel"
+        :current-mission-status="currentMissionStatus"
+        :current-execution-status="currentExecutionStatus"
+        :status-message="statusMessage"
+        :control-error="controlError"
+        :can-pause="canPause"
+        :can-resume="canResume"
+        :can-cancel="canCancel"
+        :is-controlling="isControlling"
+        :pending-action="pendingAction"
+        :is-refreshing-history="isRefreshingHistory"
+        :is-planning="isPlanning"
+        :planning-error="planningError"
+        :waypoint-count="waypoints.length"
+        :is-uploading="isUploading"
+        @refresh-history="refreshHistory"
+        @pause="pauseExecution"
+        @resume="resumeExecution"
+        @cancel="cancelExecution"
+        @upload-mission="uploadMission"
+        @clear-mission="clearMission"
+      />
 
-      <div class="hud-panel">
-        <div class="hud-item">
-          <span class="label">Pitch</span>
-          <span class="value" :class="{ warning: Math.abs(droneState.pitch) > 10 }">
-            {{ droneState.pitch.toFixed(1) }} deg
-          </span>
-        </div>
-        <div class="hud-item">
-          <span class="label">Roll</span>
-          <span class="value">{{ droneState.roll.toFixed(1) }} deg</span>
-        </div>
-      </div>
-
-      <div class="mission-card">
-        <div class="section-head">
-          <span>Current Mission</span>
-          <button class="btn-ghost" @click="refreshHistory" :disabled="isRefreshingHistory">
-            {{ isRefreshingHistory ? "SYNC..." : "SYNC" }}
-          </button>
-        </div>
-        <div class="mission-grid">
-          <div>
-            <span class="label">Mission</span>
-            <span class="value">{{ currentMissionId ? shortId(currentMissionId) : "NONE" }}</span>
-          </div>
-          <div>
-            <span class="label">Execution</span>
-            <span class="value">{{ currentExecutionId ? shortId(currentExecutionId) : "NONE" }}</span>
-          </div>
-          <div>
-            <span class="label">Mission State</span>
-            <span class="value">{{ currentMissionStatus }}</span>
-          </div>
-          <div>
-            <span class="label">Exec State</span>
-            <span class="value">{{ currentExecutionStatus }}</span>
-          </div>
-        </div>
-
-        <p v-if="statusMessage" class="hint status-message">{{ statusMessage }}</p>
-        <p v-if="controlError" class="hint hint-error">{{ controlError }}</p>
-
-        <div class="btn-row">
-          <button
-            class="btn-secondary"
-            @click="pauseExecution"
-            :disabled="!canPause || isControlling"
-          >
-            {{ isControlling && pendingAction === "pause" ? "PAUSING..." : "PAUSE" }}
-          </button>
-          <button
-            class="btn-secondary"
-            @click="resumeExecution"
-            :disabled="!canResume || isControlling"
-          >
-            {{ isControlling && pendingAction === "resume" ? "RESUMING..." : "RESUME" }}
-          </button>
-          <button
-            class="btn-danger"
-            @click="cancelExecution"
-            :disabled="!canCancel || isControlling"
-          >
-            {{ isControlling && pendingAction === "cancel" ? "CANCELLING..." : "CANCEL" }}
-          </button>
-        </div>
-      </div>
-
-      <div class="action-area">
-        <p v-if="isPlanning" class="hint">Planning route...</p>
-        <p v-else-if="planningError" class="hint hint-error">{{ planningError }}</p>
-        <p v-else-if="waypoints.length === 0" class="hint">Click map to auto-plan route</p>
-        <p v-else class="hint">Planned route: {{ waypoints.length }} nodes</p>
-
-        <div class="btn-group">
-          <button
-            @click="uploadMission"
-            :disabled="waypoints.length === 0 || isUploading || isPlanning || isControlling"
-          >
-            {{ isUploading ? "UPLOADING..." : "UPLOAD MISSION" }}
-          </button>
-          <button @click="clearMission" class="btn-danger">
-            CLEAR
-          </button>
-        </div>
-      </div>
-
-      <div class="history-card">
-        <div class="section-head">
-          <span>Recent Missions</span>
-          <span class="history-count">{{ missionHistory.length }}</span>
-        </div>
-        <div class="filter-row">
-          <button
-            v-for="option in missionFilterOptions"
-            :key="`mission-${option}`"
-            class="filter-chip"
-            :class="{ active: missionHistoryFilter === option }"
-            @click="missionHistoryFilter = option"
-          >
-            {{ option }}
-          </button>
-        </div>
-        <div v-if="selectedReplayMissionId" class="replay-banner">
-          <span>
-            Replay: {{ shortId(selectedReplayMissionId) }}
-            <template v-if="selectedReplayExecutionId">
-              / {{ shortId(selectedReplayExecutionId) }}
-            </template>
-          </span>
-          <button class="btn-ghost" @click="clearReplay">CLEAR REPLAY</button>
-        </div>
-        <div v-if="selectedReplayMission.executions.length > 0" class="execution-picker">
-          <span class="label">Replay Execution</span>
-          <div class="filter-row compact">
-            <button
-              v-for="option in executionFilterOptions"
-              :key="`execution-${option}`"
-              class="filter-chip"
-              :class="{ active: replayExecutionFilter === option }"
-              @click="replayExecutionFilter = option"
-            >
-              {{ option }}
-            </button>
-          </div>
-          <div class="execution-list">
-            <button
-              v-for="execution in replayExecutions"
-              :key="execution.execution_id"
-              class="execution-item"
-              :class="{ selected: selectedReplayExecutionId === execution.execution_id }"
-              @click="selectReplayExecution(execution.execution_id)"
-            >
-              <span class="history-name">{{ shortId(execution.execution_id) }}</span>
-              <span class="history-meta">{{ executionSummaryLabel(execution) }}</span>
-              <span class="history-meta">
-                {{ execution.status }} · {{ execution.mode }} · {{ formatTime(execution.started_at) }}
-              </span>
-            </button>
-          </div>
-        </div>
-        <div v-if="replayTrace.length > 0" class="replay-controls">
-          <div class="replay-meta">
-            <span>{{ replayPlaybackLabel }}</span>
-            <span>{{ replayProgress }} / {{ replayTrace.length - 1 }}</span>
-          </div>
-          <div class="replay-meta replay-stats">
-            <span>Points: {{ replayTrace.length }}</span>
-            <span>Span: {{ replayDurationLabel }}</span>
-          </div>
-          <input
-            v-model="replayProgress"
-            class="timeline"
-            type="range"
-            min="0"
-            :max="Math.max(replayTrace.length - 1, 0)"
-            step="1"
-          >
-          <div class="btn-row replay-actions">
-            <button class="btn-secondary" @click="toggleReplayPlayback">
-              {{ isReplayPlaying ? "PAUSE PLAYBACK" : "PLAY REPLAY" }}
-            </button>
-            <button class="btn-ghost" @click="stepReplayBackward" :disabled="replayProgress <= 0">
-              BACK
-            </button>
-            <button
-              class="btn-ghost"
-              @click="stepReplayForward"
-              :disabled="replayProgress >= replayTrace.length - 1"
-            >
-              NEXT
-            </button>
-          </div>
-        </div>
-        <div v-if="missionHistory.length === 0" class="history-empty">No mission history yet.</div>
-        <div v-else class="history-list">
-          <button
-            v-for="mission in historyPreview"
-            :key="mission.id"
-            class="history-item"
-            :class="{ selected: selectedReplayMissionId === mission.id }"
-            @click="loadMissionDetail(mission.id)"
-          >
-            <span class="history-name">{{ mission.name }}</span>
-            <span class="history-meta">{{ missionHistoryStatus(mission) }}</span>
-            <span class="history-meta">{{ missionHistoryTime(mission) }}</span>
-          </button>
-        </div>
-      </div>
+      <MissionHistoryPanel
+        :mission-count="missionHistory.length"
+        :mission-filter-options="missionFilterOptions"
+        :mission-history-filter="missionHistoryFilter"
+        :replay-banner-label="replayBannerLabel"
+        :selected-replay-mission="selectedReplayMission"
+        :execution-filter-options="executionFilterOptions"
+        :replay-execution-filter="replayExecutionFilter"
+        :replay-execution-cards="replayExecutionCards"
+        :selected-replay-execution-id="selectedReplayExecutionId"
+        :replay-trace-length="replayTrace.length"
+        :replay-playback-label="replayPlaybackLabel"
+        :replay-progress="replayProgress"
+        :replay-duration-label="replayDurationLabel"
+        :is-replay-playing="isReplayPlaying"
+        :history-cards="historyCards"
+        :selected-replay-mission-id="selectedReplayMissionId"
+        @update:mission-history-filter="missionHistoryFilter = $event"
+        @clear-replay="clearReplay"
+        @update:replay-execution-filter="replayExecutionFilter = $event"
+        @select-replay-execution="selectReplayExecution"
+        @update:replay-progress="updateReplayProgress"
+        @toggle-replay="toggleReplayPlayback"
+        @step-replay-backward="stepReplayBackward"
+        @step-replay-forward="stepReplayForward"
+        @load-mission-detail="loadMissionDetail"
+      />
     </div>
 
     <l-map
@@ -315,6 +152,9 @@ import L from "leaflet";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { LCircleMarker, LMap, LMarker, LPopup, LPolyline, LTileLayer } from "@vue-leaflet/vue-leaflet";
 
+import MissionControlPanel from "./drone-map/MissionControlPanel.vue";
+import MissionHistoryPanel from "./drone-map/MissionHistoryPanel.vue";
+import TelemetryPanel from "./drone-map/TelemetryPanel.vue";
 import { useTelemetry } from "../composables/useTelemetry";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080";
@@ -373,6 +213,17 @@ const routeTypeLabel = computed(() => routeType.value.toUpperCase());
 const canPause = computed(() => currentExecutionStatus.value === "RUNNING");
 const canResume = computed(() => currentExecutionStatus.value === "PAUSED");
 const canCancel = computed(() => ["RUNNING", "PAUSED", "QUEUED"].includes(currentExecutionStatus.value));
+const currentMissionIdLabel = computed(() => currentMissionId.value ? shortId(currentMissionId.value) : "NONE");
+const currentExecutionIdLabel = computed(() => currentExecutionId.value ? shortId(currentExecutionId.value) : "NONE");
+const replayBannerLabel = computed(() => {
+  if (!selectedReplayMissionId.value) {
+    return "";
+  }
+  return selectedReplayExecutionId.value
+    ? `Replay: ${shortId(selectedReplayMissionId.value)} / ${shortId(selectedReplayExecutionId.value)}`
+    : `Replay: ${shortId(selectedReplayMissionId.value)}`;
+});
+
 const isActiveStatus = (status) => ["RUNNING", "PAUSED", "QUEUED", "EXECUTING"].includes(status || "");
 const matchesStatusFilter = (status, filter) => {
   if (filter === "ALL") {
@@ -383,6 +234,7 @@ const matchesStatusFilter = (status, filter) => {
   }
   return status === filter;
 };
+
 const replayExecutions = computed(() => [...selectedReplayMission.value.executions]
   .filter((execution) => matchesStatusFilter(execution.status, replayExecutionFilter.value))
   .sort((left, right) => {
@@ -390,6 +242,7 @@ const replayExecutions = computed(() => [...selectedReplayMission.value.executio
     const rightTime = new Date(right.started_at || right.ended_at || 0).getTime();
     return rightTime - leftTime;
   }));
+
 const historyPreview = computed(() => [...missionHistory.value]
   .filter((mission) => {
     const latestExecution = mission.latest_execution || null;
@@ -402,6 +255,20 @@ const historyPreview = computed(() => [...missionHistory.value]
     return rightTime - leftTime;
   })
   .slice(0, 6));
+
+const replayExecutionCards = computed(() => replayExecutions.value.map((execution) => ({
+  id: execution.execution_id,
+  title: shortId(execution.execution_id),
+  summary: executionSummaryLabel(execution),
+  detail: `${execution.status} · ${String(execution.mode || "unknown").toUpperCase()} · ${formatTime(execution.started_at)}`,
+})));
+
+const historyCards = computed(() => historyPreview.value.map((mission) => ({
+  id: mission.id,
+  name: mission.name,
+  statusLine: missionHistoryStatus(mission),
+  timeLine: missionHistoryTime(mission),
+})));
 
 const displayMarkers = computed(() => {
   const markers = [];
@@ -444,18 +311,6 @@ const normalizeReplayTrace = (trace, fallbackWaypoints = []) => (
   Array.isArray(trace) && trace.length > 0 ? trace : fallbackWaypoints
 );
 
-const applyReplayExecution = (executionId) => {
-  const execution = selectedReplayMission.value.executions.find(
-    (item) => item.execution_id === executionId,
-  );
-  if (!execution) {
-    return;
-  }
-  selectedReplayExecutionId.value = execution.execution_id;
-  replayTrace.value = normalizeReplayTrace(execution.trace, replayWaypoints.value);
-  statusMessage.value = `Replay execution ${shortId(execution.execution_id)} loaded`;
-};
-
 const formatTime = (isoString) => {
   if (!isoString) {
     return "UNKNOWN";
@@ -471,7 +326,7 @@ const formatDateTime = (isoString) => {
 };
 
 const executionSummaryLabel = (execution) => {
-  const endLabel = execution.ended_at ? `end ${formatTime(execution.ended_at)}` : "active";
+  const endLabel = execution.ended_at ? `End ${formatTime(execution.ended_at)}` : "Active";
   const tracePoints = Array.isArray(execution.trace) ? execution.trace.length : 0;
   return `${endLabel} · ${tracePoints} pts`;
 };
@@ -481,7 +336,7 @@ const missionHistoryStatus = (mission) => {
   if (!latestExecution) {
     return mission.status || "UNKNOWN";
   }
-  return `${mission.status} · ${latestExecution.status} · ${latestExecution.mode.toUpperCase()}`;
+  return `${mission.status} · ${latestExecution.status} · ${String(latestExecution.mode || "unknown").toUpperCase()}`;
 };
 
 const missionHistoryTime = (mission) => {
@@ -489,6 +344,18 @@ const missionHistoryTime = (mission) => {
   return latestExecution?.started_at
     ? `Last run ${formatDateTime(latestExecution.started_at)}`
     : formatDateTime(mission.timestamp);
+};
+
+const applyReplayExecution = (executionId) => {
+  const execution = selectedReplayMission.value.executions.find(
+    (item) => item.execution_id === executionId,
+  );
+  if (!execution) {
+    return;
+  }
+  selectedReplayExecutionId.value = execution.execution_id;
+  replayTrace.value = normalizeReplayTrace(execution.trace, replayWaypoints.value);
+  statusMessage.value = `Replay execution ${shortId(execution.execution_id)} loaded`;
 };
 
 const stopReplayPlayback = () => {
@@ -541,6 +408,11 @@ const stepReplayBackward = () => {
   }
 };
 
+const updateReplayProgress = (value) => {
+  stopReplayPlayback();
+  replayProgress.value = value;
+};
+
 const onMapReady = (map) => {
   L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(map);
   currentZoom.value = map.getZoom();
@@ -588,6 +460,7 @@ const applyMissionSnapshot = (mission) => {
     executions: Array.isArray(mission.executions) ? mission.executions : [],
   };
   selectedReplayMissionId.value = mission.id || "";
+
   if (Array.isArray(mission.waypoints) && mission.waypoints.length > 0) {
     replayWaypoints.value = mission.waypoints;
     targetPoint.value = mission.waypoints[mission.waypoints.length - 1];
@@ -851,260 +724,6 @@ h3 {
   letter-spacing: 1.2px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   padding-bottom: 10px;
-}
-
-.status-box,
-.mission-card,
-.history-card {
-  background: rgba(15, 23, 42, 0.74);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  border-radius: 10px;
-  padding: 10px;
-  margin-bottom: 14px;
-}
-
-.status-box,
-.section-head,
-.replay-banner,
-.replay-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.status-box .value {
-  font-weight: bold;
-  font-family: "Courier New", monospace;
-}
-
-.status-box .value.connected {
-  color: #4ade80;
-}
-
-.status-box .value.disconnected {
-  color: #f87171;
-}
-
-.telemetry-grid,
-.mission-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.telemetry-grid div,
-.mission-grid div,
-.hud-item {
-  background: rgba(2, 6, 23, 0.45);
-  padding: 8px;
-  border-radius: 8px;
-}
-
-.hud-panel {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.hud-item {
-  flex: 1;
-  text-align: center;
-}
-
-.hud-item .value.warning,
-.hint-error {
-  color: #fca5a5;
-}
-
-.label {
-  display: block;
-  font-size: 0.68rem;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.value {
-  display: block;
-  font-size: 0.92rem;
-  font-weight: 600;
-}
-
-.hint {
-  font-size: 0.8rem;
-  color: #94a3b8;
-  margin: 0 0 10px 0;
-  text-align: center;
-}
-
-.status-message {
-  color: #7dd3fc;
-}
-
-.btn-group,
-.history-list,
-.execution-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.execution-picker {
-  margin-bottom: 10px;
-}
-
-.filter-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 10px 0;
-}
-
-.filter-row.compact {
-  margin: 8px 0;
-}
-
-.btn-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.replay-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.replay-meta {
-  color: #fcd34d;
-  font-size: 0.74rem;
-}
-
-.replay-stats {
-  color: #fde68a;
-}
-
-.timeline {
-  width: 100%;
-  accent-color: #f59e0b;
-}
-
-.replay-actions {
-  grid-template-columns: 1.2fr 0.8fr 0.8fr;
-}
-
-button {
-  padding: 11px;
-  border: none;
-  border-radius: 8px;
-  background: #0ea5e9;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-transform: uppercase;
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-}
-
-button:hover:not(:disabled) {
-  background: #0284c7;
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  background: #334155;
-  color: #64748b;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.btn-danger {
-  background: #ef4444;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: #dc2626;
-}
-
-.btn-secondary {
-  background: #1d4ed8;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #1e40af;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: #7dd3fc;
-  border: 1px solid rgba(125, 211, 252, 0.3);
-  padding: 6px 10px;
-}
-
-.btn-ghost:hover:not(:disabled) {
-  background: rgba(14, 165, 233, 0.12);
-}
-
-.filter-chip {
-  background: rgba(15, 23, 42, 0.8);
-  color: #cbd5e1;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  padding: 6px 9px;
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-}
-
-.filter-chip.active {
-  background: rgba(14, 165, 233, 0.18);
-  color: #7dd3fc;
-  border-color: rgba(56, 189, 248, 0.42);
-}
-
-.history-empty {
-  color: #94a3b8;
-  font-size: 0.8rem;
-  text-align: center;
-  padding: 8px 0 4px;
-}
-
-.history-item,
-.execution-item {
-  text-align: left;
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.history-item.selected,
-.execution-item.selected {
-  border-color: rgba(251, 191, 36, 0.65);
-  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.25);
-}
-
-.history-name,
-.history-meta {
-  display: block;
-}
-
-.history-name {
-  font-size: 0.8rem;
-  margin-bottom: 3px;
-}
-
-.history-meta,
-.history-count {
-  color: #94a3b8;
-  font-size: 0.72rem;
-}
-
-.replay-banner {
-  gap: 8px;
-  margin-bottom: 10px;
-  color: #fcd34d;
-  font-size: 0.75rem;
 }
 
 @media (max-width: 960px) {
