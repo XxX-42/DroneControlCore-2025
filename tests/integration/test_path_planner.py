@@ -55,6 +55,34 @@ async def test_plan_path_uses_directional_bbox_for_distant_targets(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_plan_path_aligns_osm_route_to_exact_clicked_endpoints(monkeypatch):
+    planner = PathPlanner()
+
+    async def fake_load_graph_for_bbox(_bbox):
+        planner.G = object()
+        planner.graph_bbox = planner.default_bbox
+        return True
+
+    def fake_calculate_path(_start_lat, _start_lon, _end_lat, _end_lon):
+        return [
+            {"latitude": 30.5983, "longitude": 103.9914},
+            {"latitude": 30.6008, "longitude": 103.9941},
+        ]
+
+    monkeypatch.setattr(planner, "load_graph_for_bbox", fake_load_graph_for_bbox)
+    monkeypatch.setattr(planner, "calculate_path", fake_calculate_path)
+
+    result = await planner.plan_path(30.598, 103.991, 30.601, 103.995)
+
+    assert result["route_type"] == "osm"
+    assert result["waypoints"][0]["latitude"] == 30.598
+    assert result["waypoints"][0]["longitude"] == 103.991
+    assert result["waypoints"][-1]["latitude"] == 30.601
+    assert result["waypoints"][-1]["longitude"] == 103.995
+    assert result["waypoints"][-1]["is_user_target"] is True
+
+
+@pytest.mark.asyncio
 async def test_ensure_graph_reuses_loaded_bbox_without_reload(monkeypatch):
     planner = PathPlanner()
     planner.G = object()

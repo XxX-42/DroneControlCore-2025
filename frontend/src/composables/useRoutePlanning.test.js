@@ -11,6 +11,7 @@ import { useRoutePlanning } from "./useRoutePlanning";
 describe("useRoutePlanning", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("plans route and updates reactive state", async () => {
@@ -41,8 +42,54 @@ describe("useRoutePlanning", () => {
     expect(setStatusMessage).toHaveBeenCalledWith("路线规划完成（OSM）");
   });
 
-  it("handles planning failure and resets route type", async () => {
-    planNavigation.mockRejectedValue(new Error("planner failed"));
+  it("appends route segments in task mode", async () => {
+    planNavigation
+      .mockResolvedValueOnce({
+        route_type: "osm",
+        waypoints: [
+          { latitude: 30.4, longitude: 103.8 },
+          { latitude: 30.5, longitude: 103.9 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        route_type: "osm",
+        waypoints: [
+          { latitude: 30.5, longitude: 103.9 },
+          { latitude: 30.6, longitude: 104.0 },
+        ],
+      });
+
+    const setStatusMessage = vi.fn();
+    const routePlanning = useRoutePlanning({
+      apiBaseUrl: "http://api",
+      droneState: ref({ lat: 30.4, lon: 103.8 }),
+      setStatusMessage,
+    });
+
+    await routePlanning.planRouteToTarget(30.5, 103.9);
+    const result = await routePlanning.planRouteToTarget(30.6, 104.0, {
+      startPoint: { latitude: 30.5, longitude: 103.9 },
+      append: true,
+    });
+
+    expect(result.waypoints).toEqual([
+      { latitude: 30.4, longitude: 103.8 },
+      { latitude: 30.5, longitude: 103.9 },
+      { latitude: 30.6, longitude: 104.0 },
+    ]);
+    expect(routePlanning.waypoints.value).toHaveLength(3);
+    expect(setStatusMessage).toHaveBeenLastCalledWith("任务路线已追加（OSM）");
+  });
+
+  it("handles planning timeout and clears pending state", async () => {
+    vi.useFakeTimers();
+    planNavigation.mockImplementation((_, __, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    }));
 
     const routePlanning = useRoutePlanning({
       apiBaseUrl: "http://api",
@@ -50,12 +97,13 @@ describe("useRoutePlanning", () => {
       setStatusMessage: vi.fn(),
     });
 
-    const result = await routePlanning.planRouteToTarget(30.6, 104.0);
+    const promise = routePlanning.planRouteToTarget(30.6, 104.0);
+    await vi.advanceTimersByTimeAsync(20000);
+    const result = await promise;
 
     expect(result).toBeNull();
-    expect(routePlanning.routeType.value).toBe("direct");
-    expect(routePlanning.planningError.value).toBe("planner failed");
-    expect(routePlanning.waypoints.value).toEqual([]);
+    expect(routePlanning.isPlanning.value).toBe(false);
+    expect(routePlanning.planningError.value).toBe("规划超时，请缩小范围后重试");
   });
 
   it("resets route planning state", () => {

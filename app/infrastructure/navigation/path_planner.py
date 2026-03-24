@@ -37,6 +37,80 @@ class PathPlanner:
         cos_lat = max(0.1, math.cos(math.radians(latitude)))
         return meters / (111_320.0 * cos_lat)
 
+    def calculate_distance_m(
+        self,
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> float:
+        earth_radius_m = 6_371_000
+        start_lat_rad = math.radians(start_lat)
+        end_lat_rad = math.radians(end_lat)
+        lat_delta_rad = math.radians(end_lat - start_lat)
+        lon_delta_rad = math.radians(end_lon - start_lon)
+
+        a = (
+            math.sin(lat_delta_rad / 2) ** 2
+            + math.cos(start_lat_rad) * math.cos(end_lat_rad) * math.sin(lon_delta_rad / 2) ** 2
+        )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return earth_radius_m * c
+
+    def align_route_endpoints(
+        self,
+        route: List[Dict],
+        start_lat: float,
+        start_lon: float,
+        end_lat: float,
+        end_lon: float,
+    ) -> List[Dict]:
+        if not route:
+            return route
+
+        aligned_route = list(route)
+        start_offset_m = self.calculate_distance_m(
+            start_lat,
+            start_lon,
+            aligned_route[0]["latitude"],
+            aligned_route[0]["longitude"],
+        )
+        end_offset_m = self.calculate_distance_m(
+            end_lat,
+            end_lon,
+            aligned_route[-1]["latitude"],
+            aligned_route[-1]["longitude"],
+        )
+
+        if start_offset_m > 1.0:
+            aligned_route.insert(
+                0,
+                {
+                    "latitude": start_lat,
+                    "longitude": start_lon,
+                },
+            )
+        else:
+            aligned_route[0] = {
+                "latitude": start_lat,
+                "longitude": start_lon,
+            }
+
+        if end_offset_m > 1.0:
+            aligned_route.append(
+                {
+                    "latitude": end_lat,
+                    "longitude": end_lon,
+                },
+            )
+        else:
+            aligned_route[-1] = {
+                "latitude": end_lat,
+                "longitude": end_lon,
+            }
+
+        return aligned_route
+
     def build_point_bbox(self, latitude: float, longitude: float, radius_m: float) -> tuple[float, float, float, float]:
         lat_delta = self.meters_to_latitude_delta(radius_m)
         lon_delta = self.meters_to_longitude_delta(radius_m, latitude)
@@ -148,6 +222,23 @@ class PathPlanner:
 
         orig_node = ox.distance.nearest_nodes(self.G, start_lon, start_lat)
         dest_node = ox.distance.nearest_nodes(self.G, end_lon, end_lat)
+        snapped_start_lat = self.G.nodes[orig_node]["y"]
+        snapped_start_lon = self.G.nodes[orig_node]["x"]
+        snapped_end_lat = self.G.nodes[dest_node]["y"]
+        snapped_end_lon = self.G.nodes[dest_node]["x"]
+
+        start_offset_m = self.calculate_distance_m(start_lat, start_lon, snapped_start_lat, snapped_start_lon)
+        end_offset_m = self.calculate_distance_m(end_lat, end_lon, snapped_end_lat, snapped_end_lon)
+
+        print(
+            "OSM snap offsets | "
+            f"start_raw=({start_lat:.6f}, {start_lon:.6f}) "
+            f"start_snapped=({snapped_start_lat:.6f}, {snapped_start_lon:.6f}) "
+            f"start_offset_m={start_offset_m:.2f} | "
+            f"target_raw=({end_lat:.6f}, {end_lon:.6f}) "
+            f"target_snapped=({snapped_end_lat:.6f}, {snapped_end_lon:.6f}) "
+            f"target_offset_m={end_offset_m:.2f}"
+        )
 
         try:
             route_nodes = nx.shortest_path(self.G, orig_node, dest_node, weight="length")
@@ -200,6 +291,7 @@ class PathPlanner:
         if await self.ensure_graph_for_route(start_lat, start_lon, end_lat, end_lon):
             try:
                 route = self.calculate_path(start_lat, start_lon, end_lat, end_lon)
+                route = self.align_route_endpoints(route, start_lat, start_lon, end_lat, end_lon)
                 route_type = "osm"
             except Exception as exc:
                 print(f"OSM route calculation failed, using direct route: {exc}")

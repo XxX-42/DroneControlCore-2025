@@ -19,8 +19,8 @@
       <p v-if="controlError" class="hint hint-error">{{ controlError }}</p>
 
       <div class="btn-row">
-        <button class="btn-secondary" @click="$emit('pause')" :disabled="!canPause || isControlling">
-          {{ isControlling && pendingAction === "pause" ? labels.pausing : labels.pause }}
+        <button class="btn-secondary" @click="$emit('stop')" :disabled="!canPause || isControlling">
+          {{ isControlling && pendingAction === "pause" ? labels.stopping : labels.stop }}
         </button>
         <button class="btn-secondary" @click="$emit('resume')" :disabled="!canResume || isControlling">
           {{ isControlling && pendingAction === "resume" ? labels.resuming : labels.resume }}
@@ -37,12 +37,22 @@
       <p v-else-if="waypointCount === 0" class="hint">{{ labels.clickMap }}</p>
       <p v-else class="hint">{{ labels.plannedRoute(waypointCount) }}</p>
 
+      <details v-if="taskTargets.length > 0" class="task-details">
+        <summary class="task-details-summary">{{ labels.more }}</summary>
+        <div class="task-details-list">
+          <div v-for="target in taskTargets" :key="target.sequence" class="task-details-item">
+            <span class="task-details-title">{{ target.label }}</span>
+            <span class="task-details-coordinates">{{ target.coordinateLabel }}</span>
+          </div>
+        </div>
+      </details>
+
       <div class="btn-group">
         <button
-          @click="$emit('upload-mission')"
-          :disabled="waypointCount === 0 || isUploading || isPlanning || isControlling"
+          @click="handlePrimaryAction"
+          :disabled="isPrimaryActionDisabled"
         >
-          {{ isUploading ? labels.uploading : labels.uploadMission }}
+          {{ primaryActionLabel }}
         </button>
         <button class="btn-danger" @click="$emit('clear-mission')">
           {{ labels.clear }}
@@ -116,6 +126,10 @@ const props = defineProps({
     type: Number,
     required: true,
   },
+  taskTargets: {
+    type: Array,
+    default: () => [],
+  },
   isUploading: {
     type: Boolean,
     required: true,
@@ -126,15 +140,15 @@ const props = defineProps({
   },
 });
 
-defineEmits(["refresh-history", "pause", "resume", "cancel", "upload-mission", "clear-mission"]);
+const emit = defineEmits(["refresh-history", "stop", "resume", "cancel", "upload-mission", "resume-mission", "clear-mission"]);
 
 const I18N = {
   zh: {
     currentMission: "\u5f53\u524d\u4efb\u52a1",
     sync: "\u540c\u6b65",
     syncing: "\u540c\u6b65\u4e2d...",
-    pause: "\u6682\u505c",
-    pausing: "\u6682\u505c\u4e2d...",
+    stop: "\u505c\u6b62",
+    stopping: "\u505c\u6b62\u4e2d...",
     resume: "\u7ee7\u7eed",
     resuming: "\u7ee7\u7eed\u4e2d...",
     cancel: "\u53d6\u6d88",
@@ -142,8 +156,10 @@ const I18N = {
     planning: "\u6b63\u5728\u89c4\u5212\u8def\u7ebf...",
     clickMap: "\u70b9\u51fb\u5730\u56fe\u81ea\u52a8\u89c4\u5212\u8def\u7ebf",
     plannedRoute: (count) => `\u5df2\u89c4\u5212\u8def\u7ebf\uff1a${count} \u4e2a\u8282\u70b9`,
+    more: "More",
     uploading: "\u4e0a\u4f20\u4e2d...",
     uploadMission: "\u4e0a\u4f20\u4efb\u52a1",
+    continueMission: "\u7ee7\u7eed\u4efb\u52a1",
     clear: "\u6e05\u7a7a",
     mission: "\u4efb\u52a1",
     execution: "\u6267\u884c",
@@ -154,8 +170,8 @@ const I18N = {
     currentMission: "Current Mission",
     sync: "SYNC",
     syncing: "SYNC...",
-    pause: "PAUSE",
-    pausing: "PAUSING...",
+    stop: "STOP",
+    stopping: "STOPPING...",
     resume: "RESUME",
     resuming: "RESUMING...",
     cancel: "CANCEL",
@@ -163,8 +179,10 @@ const I18N = {
     planning: "Planning route...",
     clickMap: "Click map to auto-plan route",
     plannedRoute: (count) => `Planned route: ${count} nodes`,
+    more: "More",
     uploading: "UPLOADING...",
     uploadMission: "UPLOAD MISSION",
+    continueMission: "CONTINUE MISSION",
     clear: "CLEAR",
     mission: "Mission",
     execution: "Execution",
@@ -203,6 +221,29 @@ const missionItems = computed(() => [
   { label: labels.value.missionState, value: formatMissionValue(labels.value.missionState, props.currentMissionStatus) },
   { label: labels.value.execState, value: formatMissionValue(labels.value.execState, props.currentExecutionStatus) },
 ]);
+
+const isResumePrimary = computed(() => props.canResume);
+const isPrimaryActionDisabled = computed(() => {
+  if (isResumePrimary.value) {
+    return props.isControlling || !props.canResume;
+  }
+  return props.waypointCount === 0 || props.isUploading || props.isPlanning || props.isControlling;
+});
+const primaryActionLabel = computed(() => {
+  if (isResumePrimary.value) {
+    return props.isControlling && props.pendingAction === "resume"
+      ? labels.value.resuming
+      : labels.value.continueMission;
+  }
+  return props.isUploading ? labels.value.uploading : labels.value.uploadMission;
+});
+const handlePrimaryAction = () => {
+  if (isResumePrimary.value) {
+    emit("resume-mission");
+    return;
+  }
+  emit("upload-mission");
+};
 </script>
 
 <style scoped>
@@ -272,6 +313,54 @@ const missionItems = computed(() => [
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.task-details {
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.35);
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  overflow: hidden;
+}
+
+.task-details-summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  color: #7dd3fc;
+  font-size: 0.78rem;
+  font-weight: 700;
+  list-style: none;
+}
+
+.task-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-details-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.task-details-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.task-details-title {
+  color: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.task-details-coordinates {
+  color: #7dd3fc;
+  font-size: 0.74rem;
 }
 
 button {

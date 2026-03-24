@@ -20,6 +20,30 @@ describe("useMissionControl", () => {
     expect(missionControl.isRefreshingHistory.value).toBe(false);
   });
 
+  it("restores active execution state from mission history after refresh", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ([
+        {
+          id: "mission-active",
+          status: "EXECUTING",
+          executions: [
+            { execution_id: "exec-active", status: "RUNNING" },
+          ],
+        },
+      ]),
+    })));
+
+    const missionControl = useMissionControl("http://api");
+    await missionControl.refreshHistory();
+
+    expect(missionControl.currentMissionId.value).toBe("mission-active");
+    expect(missionControl.currentExecutionId.value).toBe("exec-active");
+    expect(missionControl.currentMissionStatus.value).toBe("EXECUTING");
+    expect(missionControl.currentExecutionStatus.value).toBe("RUNNING");
+    expect(missionControl.canPause.value).toBe(true);
+  });
+
   it("uploads mission and updates execution state", async () => {
     vi.stubGlobal("fetch", vi
       .fn()

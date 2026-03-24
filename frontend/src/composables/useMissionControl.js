@@ -22,6 +22,34 @@ export function useMissionControl(apiBaseUrl) {
     resume: "\u7ee7\u7eed",
     cancel: "\u53d6\u6d88",
   };
+  const activeExecutionStatuses = ["RUNNING", "PAUSED", "QUEUED"];
+  const refreshHistoryInBackground = () => {
+    refreshHistory();
+  };
+
+  const syncCurrentExecutionFromHistory = () => {
+    const activeMission = missionHistory.value.find((mission) =>
+      Array.isArray(mission.executions)
+      && mission.executions.some((execution) => activeExecutionStatuses.includes(execution.status)),
+    );
+
+    if (!activeMission) {
+      return;
+    }
+
+    const activeExecution = activeMission.executions.find((execution) =>
+      activeExecutionStatuses.includes(execution.status),
+    );
+
+    if (!activeExecution) {
+      return;
+    }
+
+    currentMissionId.value = activeMission.id;
+    currentExecutionId.value = activeExecution.execution_id;
+    currentMissionStatus.value = activeMission.status;
+    currentExecutionStatus.value = activeExecution.status;
+  };
 
   const translateMissionMessage = (message) => {
     if (!message) {
@@ -40,6 +68,7 @@ export function useMissionControl(apiBaseUrl) {
     isRefreshingHistory.value = true;
     try {
       missionHistory.value = await fetchMissionHistory(apiBaseUrl);
+      syncCurrentExecutionFromHistory();
     } catch (error) {
       controlError.value = error.message;
     } finally {
@@ -72,7 +101,7 @@ export function useMissionControl(apiBaseUrl) {
       currentMissionStatus.value = result.mission_status;
       currentExecutionStatus.value = result.execution_status;
       statusMessage.value = translateMissionMessage(result.message);
-      await refreshHistory();
+      refreshHistoryInBackground();
       return result;
     } catch (error) {
       controlError.value = error.message;
@@ -96,7 +125,7 @@ export function useMissionControl(apiBaseUrl) {
       currentMissionStatus.value = result.mission_status;
       currentExecutionStatus.value = result.execution_status;
       statusMessage.value = `\u6267\u884c${actionLabelMap[action] || action}\u6210\u529f`;
-      await refreshHistory();
+      refreshHistoryInBackground();
       return result;
     } catch (error) {
       controlError.value = error.message;

@@ -34,7 +34,7 @@ class DroneState:
         
         # Navigation Data
         self.waypoint_queue: List[Dict] = []
-        self.state = "IDLE" # IDLE, NAVIGATING, SPIRALING
+        self.state = "IDLE" # IDLE, NAVIGATING
         self.trace_points: List[Dict] = []
         
         # Spiral Mechanics
@@ -137,7 +137,7 @@ class DroneState:
             self.record_trace_point()
             return
         
-        if this_is_idle := (not self.waypoint_queue and self.state != "SPIRALING"):
+        if not self.waypoint_queue:
             self.state = "IDLE"
             self.pitch = 0.0
             self.roll = 0.0
@@ -197,46 +197,6 @@ class DroneState:
                 
                 self.heading = target_heading
                 self.yaw = self.heading
-
-        # --- STATE: SPIRALING ( shrinking orbit ) ---
-        elif self.state == "SPIRALING":
-            # 1. Shrink Radius
-            if self.current_radius > self.DIST_FINAL_RADIUS:
-                self.current_radius -= self.SPIRAL_DECAY * self.sim_speed_factor
-            
-            # 2. Exit Condition (Reached 20m)
-            if self.current_radius <= self.DIST_FINAL_RADIUS:
-                print("[DEBUG] Spiral Complete (20m). Mission segment done.")
-                if self.waypoint_queue:
-                    self.waypoint_queue.pop(0) # Remove the finished target
-                
-                if self.waypoint_queue:
-                    self.state = "NAVIGATING" # Go to next target
-                else:
-                    self.state = "IDLE" # All done
-                self.record_trace_point()
-                return
-
-            # 3. Orbital Mechanics
-            # Update angle
-            rad_change = math.radians(self.SPIRAL_SPEED_DEG) * self.sim_speed_factor
-            self.spiral_angle_rad = (self.spiral_angle_rad + rad_change) % (2 * math.pi)
-            
-            # Update Position (Polar to Cartesian)
-            c_lat, c_lon = self.spiral_center
-            # Using (sin, cos) for (lat, lon) mapping
-            self.lat = c_lat - (self.current_radius * math.sin(self.spiral_angle_rad))
-            self.lon = c_lon - (self.current_radius * math.cos(self.spiral_angle_rad))
-            
-            # Heading is tangent (perpendicular to radius)
-            target_heading = (math.degrees(self.spiral_angle_rad) + 90) % 360
-            
-            # --- ATTITUDE SIMULATION (Banking) ---
-            # Bank into the turn. Constant turn rate = constant bank angle.
-            # V = r * omega. tan(bank) = v^2 / (r*g) or just proportional to turn rate.
-            # Simple Hack: Bank 20 degrees for spiral
-            self.roll = 20.0 
-            self.heading = target_heading
 
         # --- VALIDATION CLAMP ---
         # Ensure we don't go underground or to space

@@ -19,6 +19,7 @@ const baseProps = {
   isPlanning: false,
   planningError: "",
   waypointCount: 3,
+  taskTargets: [],
   isUploading: false,
   locale: "en",
 };
@@ -40,16 +41,17 @@ describe("MissionControlPanel", () => {
     await buttons[5].trigger("click");
 
     expect(wrapper.emitted("refresh-history")).toHaveLength(1);
-    expect(wrapper.emitted("pause")).toHaveLength(1);
+    expect(wrapper.emitted("stop")).toHaveLength(1);
     expect(wrapper.emitted("resume")).toBeUndefined();
     expect(wrapper.emitted("cancel")).toHaveLength(1);
     expect(wrapper.emitted("clear-mission")).toHaveLength(1);
   });
 
-  it("disables actions based on state and emits upload", async () => {
+  it("uses continue mission as the primary action when paused", async () => {
     const wrapper = mount(MissionControlPanel, {
       props: {
         ...baseProps,
+        currentExecutionStatus: "PAUSED",
         canResume: true,
         canPause: false,
       },
@@ -58,9 +60,10 @@ describe("MissionControlPanel", () => {
     const buttons = wrapper.findAll("button");
     expect(buttons[1].attributes("disabled")).toBeDefined();
     expect(buttons[2].attributes("disabled")).toBeUndefined();
+    expect(buttons[4].text()).toContain("CONTINUE MISSION");
 
     await buttons[4].trigger("click");
-    expect(wrapper.emitted("upload-mission")).toHaveLength(1);
+    expect(wrapper.emitted("resume-mission")).toHaveLength(1);
   });
 
   it("shows planning and control status messages", () => {
@@ -87,7 +90,7 @@ describe("MissionControlPanel", () => {
     });
 
     expect(wrapper.text()).toContain("当前任务");
-    expect(wrapper.text()).toContain("上传任务");
+    expect(wrapper.text()).toContain("停止");
     expect(wrapper.text()).toContain("执行中");
     expect(wrapper.text()).toContain("运行中");
   });
