@@ -119,8 +119,13 @@ vi.mock("@vue-leaflet/vue-leaflet", () => {
 vi.mock("./drone-map/MissionControlPanel.vue", () => ({
   default: defineComponent({
     name: "MissionControlPanel",
-    setup() {
-      return () => h("div", { class: "mission-control-panel-stub" });
+    emits: ["upload-mission", "clear-mission"],
+    setup(_, { emit }) {
+      return () =>
+        h("div", { class: "mission-control-panel-stub" }, [
+          h("button", { class: "upload-mission-trigger", onClick: () => emit("upload-mission") }, "upload"),
+          h("button", { class: "clear-mission-trigger", onClick: () => emit("clear-mission") }, "clear"),
+        ]);
     },
   }),
 }));
@@ -331,6 +336,65 @@ describe("DroneMap", () => {
     );
   });
 
+  it("keeps only the final task click after ten rapid taps", async () => {
+    const { default: DroneMap } = await import("./DroneMap.vue");
+    const wrapper = mount(DroneMap);
+
+    await flushPromises();
+    const triggers = [
+      ".map-click-trigger-first",
+      ".map-click-trigger-second",
+      ".map-click-trigger-third",
+      ".map-click-trigger-fourth",
+    ];
+
+    for (let index = 0; index < 10; index += 1) {
+      await wrapper.find(triggers[index % triggers.length]).trigger("click");
+    }
+
+    expect(routePlanningState.planRouteToTarget).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledTimes(1);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledWith(
+      30.5728,
+      104.0668,
+      expect.objectContaining({ append: false }),
+    );
+  });
+
+  it("keeps only the final realtime click and uploads once after ten rapid taps", async () => {
+    const { default: DroneMap } = await import("./DroneMap.vue");
+    const wrapper = mount(DroneMap);
+
+    await flushPromises();
+    await getModeButtons(wrapper)[1].trigger("click");
+
+    const triggers = [
+      ".map-click-trigger-first",
+      ".map-click-trigger-second",
+      ".map-click-trigger-third",
+      ".map-click-trigger-fourth",
+    ];
+
+    for (let index = 0; index < 10; index += 1) {
+      await wrapper.find(triggers[index % triggers.length]).trigger("click");
+    }
+
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledTimes(1);
+    expect(routePlanningState.planRouteToTarget).toHaveBeenCalledWith(
+      30.5728,
+      104.0668,
+      expect.objectContaining({ append: false }),
+    );
+    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(1);
+  });
+
   it("queues task mode execution until the active realtime mission finishes", async () => {
     const { default: DroneMap } = await import("./DroneMap.vue");
     const wrapper = mount(DroneMap);
@@ -503,6 +567,44 @@ describe("DroneMap", () => {
     await wrapper.findAll(".map-focus-button")[1].trigger("click");
 
     expect(leafletMapMock.setView).toHaveBeenCalledWith([30.598, 103.991], 17);
+  });
+
+  it("does not double upload when a user deletes a point during an in-flight upload", async () => {
+    const uploadDeferred = {};
+    missionControlState.uploadMission.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          uploadDeferred.resolve = resolve;
+        }),
+    );
+
+    const { default: DroneMap } = await import("./DroneMap.vue");
+    const wrapper = mount(DroneMap);
+
+    await flushPromises();
+    await wrapper.find(".map-click-trigger-first").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await wrapper.find(".map-click-trigger-second").trigger("click");
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await wrapper.find(".upload-mission-trigger").trigger("click");
+    await flushPromises();
+
+    await getTaskMarkerButtons(wrapper)[0].trigger("click");
+    await flushPromises();
+
+    expect(missionControlState.uploadMission).toHaveBeenCalledTimes(1);
+
+    uploadDeferred.resolve({
+      mission_id: "mission-abcdef01",
+      execution_id: "exec-abcdef01",
+      mission_status: "EXECUTING",
+      execution_status: "RUNNING",
+    });
+    await flushPromises();
   });
 
   it("rebuilds and renumbers remaining points after deleting a middle task point", async () => {

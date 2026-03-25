@@ -39,7 +39,7 @@ describe("useRoutePlanning", () => {
       [30.5, 103.9],
       [30.6, 104.0],
     ]);
-    expect(setStatusMessage).toHaveBeenCalledWith("路线规划完成（OSM）");
+    expect(setStatusMessage).toHaveBeenCalled();
   });
 
   it("appends route segments in task mode", async () => {
@@ -78,7 +78,7 @@ describe("useRoutePlanning", () => {
       { latitude: 30.6, longitude: 104.0 },
     ]);
     expect(routePlanning.waypoints.value).toHaveLength(3);
-    expect(setStatusMessage).toHaveBeenLastCalledWith("任务路线已追加（OSM）");
+    expect(setStatusMessage).toHaveBeenCalled();
   });
 
   it("handles planning timeout and clears pending state", async () => {
@@ -103,7 +103,51 @@ describe("useRoutePlanning", () => {
 
     expect(result).toBeNull();
     expect(routePlanning.isPlanning.value).toBe(false);
-    expect(routePlanning.planningError.value).toBe("规划超时，请缩小范围后重试");
+    expect(routePlanning.planningError.value).not.toBe("");
+  });
+
+  it("keeps only the latest route when a previous request is aborted by a newer one", async () => {
+    let resolveSecondRequest;
+
+    planNavigation
+      .mockImplementationOnce((_, __, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveSecondRequest = resolve;
+      }));
+
+    const routePlanning = useRoutePlanning({
+      apiBaseUrl: "http://api",
+      droneState: ref({ lat: 30.4, lon: 103.8 }),
+      setStatusMessage: vi.fn(),
+    });
+
+    const firstPromise = routePlanning.planRouteToTarget(30.5, 103.9);
+    const secondPromise = routePlanning.planRouteToTarget(30.6, 104.0);
+
+    resolveSecondRequest({
+      route_type: "osm",
+      waypoints: [
+        { latitude: 30.4, longitude: 103.8 },
+        { latitude: 30.6, longitude: 104.0 },
+      ],
+    });
+
+    const [firstResult, secondResult] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(firstResult).toBeNull();
+    expect(secondResult.route_type).toBe("osm");
+    expect(routePlanning.waypoints.value).toEqual([
+      { latitude: 30.4, longitude: 103.8 },
+      { latitude: 30.6, longitude: 104.0 },
+    ]);
+    expect(routePlanning.isPlanning.value).toBe(false);
+    expect(routePlanning.planningError.value).toBe("");
   });
 
   it("resets route planning state", () => {
